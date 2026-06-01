@@ -30,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from wiki_server.paths import resolve_under_root
+from wiki_server.store import write_stm_entry
 
 DEFAULT_PUBLIC_URL = "https://wiki.florent-lejoly.be"
 DEFAULT_ALLOWED_LOGIN = "FloLey"
@@ -125,6 +126,43 @@ def read_long_term_index() -> str:
     if not path.is_file():
         return "long_term/index.md does not exist yet."
     return path.read_text(encoding="utf-8")
+
+
+@mcp.tool
+def read_short_term_index() -> str:
+    """Read the short-term memory index (``short_term/index.md``).
+
+    A table of recent captures: id, time, a one-line summary, and tags. The
+    summary is usually enough; open the full entry only when you need detail.
+    """
+    path = resolve_under_root("short_term/index.md")
+    if not path.is_file():
+        return "short_term/index.md does not exist yet."
+    return path.read_text(encoding="utf-8")
+
+
+@mcp.tool
+def read_short_term_entry(entry_id: int) -> str:
+    """Read the full text of a single short-term entry by its id."""
+    path = resolve_under_root(f"short_term/entries/{entry_id}.md")
+    if not path.is_file():
+        return f"Short-term entry {entry_id} does not exist."
+    return path.read_text(encoding="utf-8")
+
+
+@mcp.tool
+def remember(content: str, summary: str = "", tags: list[str] | None = None) -> str:
+    """Capture something durable into short-term memory.
+
+    Use this when the user mentions something worth keeping: a fact about them,
+    a decision, a preference, an ongoing project. ``content`` is the text to
+    store, ``summary`` is an optional one-line label for the index (derived from
+    the first line if omitted), and ``tags`` is an optional list of short tags.
+    """
+    if not content.strip():
+        raise ToolError("Nothing to remember: content is empty.")
+    entry_id, created = write_stm_entry(content, summary=summary, tags=tags)
+    return f"Remembered as short-term entry {entry_id} ({created})."
 
 
 @mcp.custom_route("/health", methods=["GET"])

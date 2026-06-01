@@ -10,17 +10,27 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
-## Status: Slice 2 (GitHub OAuth)
+## Status: Slice 3 (short-term memory)
 
-Slice 1 proved the chain end to end (deploy a remote MCP server, expose it over
-HTTPS, connect Claude.ai). Slice 2 closes the open door with GitHub OAuth (see
-Authentication below).
+Slice 1 proved the chain end to end (remote MCP server over HTTPS, connected to
+Claude.ai). Slice 2 closed the open door with GitHub OAuth. Slice 3 makes the
+wiki start living: Claude can write to short-term memory and read it back.
 
 It exposes:
 
 - `ping(message)` - connectivity check, echoes the message back.
-- `read_long_term_index()` - reads the seeded `long_term/index.md`.
+- `read_long_term_index()` - reads `long_term/index.md`.
+- `read_short_term_index()` - reads the short-term index table.
+- `read_short_term_entry(id)` - reads one short-term entry in full.
+- `remember(content, summary?, tags?)` - captures something into short-term
+  memory: writes `short_term/entries/{id}.md`, appends a row to the index, and
+  commits with a `stm:` prefix.
 - `GET /health` - liveness probe for the Docker healthcheck.
+
+Short-term memory is the open, fast-to-write layer. It accumulates as you talk;
+a later consolidation phase will distil it into curated long-term pages. Writing
+is intentionally the only write path exposed over MCP: structural long-term
+edits belong to the (future) nightly daemon, not to a live conversation.
 
 ## Authentication (slice 2)
 
