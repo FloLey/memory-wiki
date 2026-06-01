@@ -10,11 +10,11 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
-## Status: Slice 1 (dummy MCP)
+## Status: Slice 2 (GitHub OAuth)
 
-The goal of this slice is to prove the chain end to end: deploy a remote MCP
-server, expose it over HTTPS, and connect Claude.ai to it. It is intentionally
-small.
+Slice 1 proved the chain end to end (deploy a remote MCP server, expose it over
+HTTPS, connect Claude.ai). Slice 2 closes the open door with GitHub OAuth (see
+Authentication below).
 
 It exposes:
 
@@ -22,8 +22,38 @@ It exposes:
 - `read_long_term_index()` - reads the seeded `long_term/index.md`.
 - `GET /health` - liveness probe for the Docker healthcheck.
 
-There is **no authentication yet**. That is deliberate for this slice; OAuth is
-the next step. Do not put sensitive content in the wiki until auth lands.
+## Authentication (slice 2)
+
+The server is protected by **GitHub OAuth** via FastMCP's `GitHubProvider` (an
+OAuth proxy that runs the standard OAuth 2.1 + PKCE discovery flow Claude.ai
+expects). On top of "any valid GitHub login", an allow-list middleware
+(`AllowedUserMiddleware`) restricts access to a single GitHub account
+(`WIKI_ALLOWED_GITHUB_LOGIN`), so the wiki stays private to its owner.
+
+Controlled by environment:
+
+- `WIKI_AUTH_DISABLED=1` runs the server open. The **dev compose sets this**, so
+  local development needs no secrets.
+- Otherwise `GH_OAUTH_CLIENT_ID` and `GH_OAUTH_CLIENT_SECRET` are **required**;
+  the server refuses to start without them (production can never come up
+  silently open). `WIKI_JWT_SIGNING_KEY` should be set to a stable random value
+  so issued tokens survive restarts and the user is not forced to re-authorize
+  on every deploy.
+
+In production these come from repository Actions secrets, injected by the deploy
+workflow into a gitignored `.env` on the VPS. The `/health` route stays public
+regardless, for the container healthcheck.
+
+### GitHub OAuth app setup (one time)
+
+Create a GitHub OAuth App (Settings -> Developer settings -> OAuth Apps) with:
+
+- Homepage URL: `https://wiki.florent-lejoly.be`
+- Authorization callback URL: `https://wiki.florent-lejoly.be/auth/callback`
+
+Then set the repository Actions secrets `GH_OAUTH_CLIENT_ID`,
+`GH_OAUTH_CLIENT_SECRET`, `WIKI_JWT_SIGNING_KEY` (names must not start with
+`GITHUB_`, which GitHub reserves).
 
 ## Architecture
 
@@ -59,8 +89,10 @@ npx @modelcontextprotocol/inspector
 1. Make sure `wiki.florent-lejoly.be` resolves to the same public IP as
    `florent-lejoly.be` (one DNS record, see the deploy note below).
 2. In Claude.ai: Settings -> Connectors -> Add custom connector.
-3. URL: `https://wiki.florent-lejoly.be/mcp`. No auth for this slice.
-4. Ask Claude to call `ping`, then `read_long_term_index()`.
+3. URL: `https://wiki.florent-lejoly.be/mcp`.
+4. Claude redirects you to GitHub to log in and consent. Only the allow-listed
+   GitHub account can use the tools.
+5. Ask Claude to call `ping`, then `read_long_term_index()`.
 
 ## Deploy note (one manual prerequisite)
 

@@ -1,13 +1,21 @@
 """Personal Memory Wiki MCP server.
 
-Slice 1 (dummy MCP): a working remote MCP server that Claude.ai can connect to
-over HTTPS. It exposes one trivial connectivity tool (``ping``) and one real
-read tool (``read_long_term_index``) that reads the seeded long-term index.
+Read tools so far: a trivial connectivity check (``ping``) and the long-term
+index reader (``read_long_term_index``).
 
-Later slices add auth, short-term writing (``remember``), full-text search, the
-remaining read tools, and the consolidation/digest daemons. Structural writes
-to long-term memory are never exposed via MCP; they belong to the nightly
-daemon only.
+Authentication (slice 2): when configured, the server is protected by GitHub
+OAuth via FastMCP's ``GitHubProvider`` (an OAuth proxy that lets Claude.ai run
+the standard OAuth 2.1 + PKCE discovery flow against an upstream GitHub OAuth
+app). On top of "any valid GitHub login", an allow-list middleware restricts
+access to a single GitHub account, so the wiki stays private to its owner.
+
+Auth is controlled by environment:
+- ``WIKI_AUTH_DISABLED=1`` runs the server open (local development only).
+- Otherwise ``GH_OAUTH_CLIENT_ID`` and ``GH_OAUTH_CLIENT_SECRET`` are required,
+  and the server fails loudly if they are missing (so production can never come
+  up silently unauthenticated).
+
+The ``/health`` route stays public regardless, for the container healthcheck.
 """
 
 from __future__ import annotations
@@ -15,12 +23,87 @@ from __future__ import annotations
 import os
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from wiki_server.paths import resolve_under_root
 
-mcp = FastMCP("personal-memory-wiki")
+DEFAULT_PUBLIC_URL = "https://wiki.florent-lejoly.be"
+DEFAULT_ALLOWED_LOGIN = "FloLey"
+
+
+def _build_auth():
+    """Build the auth provider from the environment, or ``None`` when auth is
+    explicitly disabled for local development."""
+    if os.environ.get("WIKI_AUTH_DISABLED") == "1":
+        return None
+
+    # Imported lazily so the open/dev path has no hard dependency on the
+    # provider stack.
+    from fastmcp.server.auth.providers.github import GitHubProvider
+
+    client_id = os.environ.get("GH_OAUTH_CLIENT_ID")
+    client_secret = os.environ.get("GH_OAUTH_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "Auth is enabled but GH_OAUTH_CLIENT_ID / GH_OAUTH_CLIENT_SECRET are "
+            "not set. Set them, or set WIKI_AUTH_DISABLED=1 for local development."
+        )
+
+    kwargs = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "base_url": os.environ.get("WIKI_PUBLIC_URL", DEFAULT_PUBLIC_URL),
+        "required_scopes": ["user"],
+    }
+    # A stable signing key keeps issued tokens valid across restarts/redeploys,
+    # so the user is not forced to re-authorize on every deploy.
+    signing_key = os.environ.get("WIKI_JWT_SIGNING_KEY")
+    if signing_key:
+        kwargs["jwt_signing_key"] = signing_key
+
+    return GitHubProvider(**kwargs)
+
+
+class AllowedUserMiddleware(Middleware):
+    """Restrict every tool call to a single GitHub login.
+
+    GitHub OAuth on its own lets *any* GitHub account through. This narrows it
+    to the wiki owner by checking the ``login`` claim that the GitHub token
+    verifier attaches to the access token.
+    """
+
+    def __init__(self, allowed_login: str):
+        normalized = (allowed_login or "").strip().lower()
+        if not normalized:
+            # Fail closed: an empty allow-list, combined with an empty/missing
+            # login claim, could otherwise let an unintended caller through.
+            raise ValueError(
+                "WIKI_ALLOWED_GITHUB_LOGIN must be a non-empty GitHub login."
+            )
+        self.allowed_login = normalized
+
+    async def on_call_tool(self, context, call_next):
+        token = get_access_token()
+        if token is None:
+            raise ToolError("Access denied: unauthenticated request.")
+        claims = getattr(token, "claims", {}) or {}
+        login = claims.get("login")
+        # Deny on a missing/empty login too, never just on inequality.
+        if not isinstance(login, str) or login.strip().lower() != self.allowed_login:
+            raise ToolError("Access denied: this wiki is private to its owner.")
+        return await call_next(context)
+
+
+_auth = _build_auth()
+mcp = FastMCP(name="personal-memory-wiki", auth=_auth)
+
+if _auth is not None:
+    _allowed_login = os.environ.get("WIKI_ALLOWED_GITHUB_LOGIN", DEFAULT_ALLOWED_LOGIN)
+    mcp.add_middleware(AllowedUserMiddleware(_allowed_login))
 
 
 @mcp.tool
@@ -46,7 +129,8 @@ def read_long_term_index() -> str:
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_request: Request) -> JSONResponse:
-    """Liveness probe used by the Docker healthcheck and deploy ``--wait``."""
+    """Liveness probe used by the Docker healthcheck and deploy ``--wait``.
+    Stays public (unauthenticated) on purpose."""
     return JSONResponse({"ok": True})
 
 
