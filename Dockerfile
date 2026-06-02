@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Dependencies first for layer caching. pyproject.toml is the source of truth;
 # the explicit pin here keeps the image build self-contained.
-RUN pip install --no-cache-dir "fastmcp>=2.0,<3"
+RUN pip install --no-cache-dir "fastmcp>=2.0,<3" "markdown-it-py>=3,<4"
 
 COPY src/ ./src/
 COPY seed/ ./seed/

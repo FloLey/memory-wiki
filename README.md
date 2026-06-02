@@ -10,13 +10,14 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
-## Status: Slice 3 (short-term memory)
+## Status: Slice 4 (web console)
 
 Slice 1 proved the chain end to end (remote MCP server over HTTPS, connected to
-Claude.ai). Slice 2 closed the open door with GitHub OAuth. Slice 3 makes the
-wiki start living: Claude can write to short-term memory and read it back.
+Claude.ai). Slice 2 closed the open door with GitHub OAuth. Slice 3 made the
+wiki start living (short-term memory). Slice 4 adds a private **web console** at
+`/ui` to consult and hand-edit the memory in a browser.
 
-It exposes:
+MCP tools (for Claude):
 
 - `ping(message)` - connectivity check, echoes the message back.
 - `read_long_term_index()` - reads `long_term/index.md`.
@@ -25,12 +26,37 @@ It exposes:
 - `remember(content, summary?, tags?)` - captures something into short-term
   memory: writes `short_term/entries/{id}.md`, appends a row to the index, and
   commits with a `stm:` prefix.
-- `GET /health` - liveness probe for the Docker healthcheck.
+- `GET /health` - liveness probe for the Docker healthcheck (public).
 
 Short-term memory is the open, fast-to-write layer. It accumulates as you talk;
-a later consolidation phase will distil it into curated long-term pages. Writing
-is intentionally the only write path exposed over MCP: structural long-term
-edits belong to the (future) nightly daemon, not to a live conversation.
+a later consolidation phase will distil it into curated long-term pages. Over
+MCP, `remember` is intentionally the only write path: structural long-term edits
+belong to the web console or the (future) nightly daemon, not to a live
+conversation.
+
+## Web console (slice 4)
+
+A private, browser-facing console served by the same process at `/ui`:
+
+- `/ui` - overview: lists every markdown file under the wiki (the structure).
+- `/ui/page/{path}` - view a page rendered from markdown.
+- `/ui/edit?path=...` - edit a page (or create a new one when path is empty).
+- `POST /ui/save`, `POST /ui/delete` - write or soft-delete, committed with a
+  `manual:` prefix. Soft-delete removes the file from the working tree but keeps
+  it in git history.
+- `/ui/login`, `/ui/auth/callback`, `/ui/logout` - GitHub login flow.
+
+Auth: a browser GitHub login (the **same** OAuth app as the MCP endpoint),
+restricted to the owner (`WIKI_ALLOWED_GITHUB_LOGIN`), with a signed,
+HttpOnly/Secure session cookie. Forms carry a signed CSRF token. Markdown is
+rendered with raw HTML disabled, so stored content cannot inject markup. In
+local dev (`WIKI_AUTH_DISABLED=1`) the login is bypassed.
+
+> **One-time GitHub change required:** the console callback is
+> `https://wiki.florent-lejoly.be/ui/auth/callback`, which is not a subpath of
+> the MCP callback. Set the GitHub OAuth app's **Authorization callback URL** to
+> the root `https://wiki.florent-lejoly.be/`; GitHub accepts any subpath of it,
+> so both `/auth/callback` (Claude) and `/ui/auth/callback` (console) work.
 
 ## Authentication (slice 2)
 

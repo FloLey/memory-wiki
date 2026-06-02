@@ -31,6 +31,7 @@ from starlette.responses import JSONResponse
 
 from wiki_server.paths import resolve_under_root
 from wiki_server.store import write_stm_entry
+from wiki_server.ui import register_ui
 
 DEFAULT_PUBLIC_URL = "https://wiki.florent-lejoly.be"
 DEFAULT_ALLOWED_LOGIN = "FloLey"
@@ -105,6 +106,18 @@ mcp = FastMCP(name="personal-memory-wiki", auth=_auth)
 if _auth is not None:
     _allowed_login = os.environ.get("WIKI_ALLOWED_GITHUB_LOGIN", DEFAULT_ALLOWED_LOGIN)
     mcp.add_middleware(AllowedUserMiddleware(_allowed_login))
+
+# Browser console at /ui, gated by GitHub login restricted to the owner (or open
+# in local dev when WIKI_AUTH_DISABLED=1). Reuses the same GitHub OAuth app.
+register_ui(
+    mcp,
+    owner_login=os.environ.get("WIKI_ALLOWED_GITHUB_LOGIN", DEFAULT_ALLOWED_LOGIN),
+    client_id=os.environ.get("GH_OAUTH_CLIENT_ID", ""),
+    client_secret=os.environ.get("GH_OAUTH_CLIENT_SECRET", ""),
+    public_url=os.environ.get("WIKI_PUBLIC_URL", DEFAULT_PUBLIC_URL),
+    secret_key=os.environ.get("WIKI_JWT_SIGNING_KEY", "dev-insecure-key"),
+    auth_disabled=os.environ.get("WIKI_AUTH_DISABLED") == "1",
+)
 
 
 @mcp.tool

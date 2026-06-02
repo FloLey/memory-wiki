@@ -5,6 +5,7 @@ description = "MCP server for a persistent personal memory wiki"
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.0,<3",
+    "markdown-it-py>=3,<4",
 ]
 
 [build-system]

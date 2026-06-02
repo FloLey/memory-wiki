@@ -116,3 +116,27 @@ def write_stm_entry(
 
         git_commit(f"stm: remember entry {entry_id}")
         return entry_id, created
+
+
+def write_file(rel: str, content: str, message: str):
+    """Write/overwrite a file under the wiki root and commit. Used by the web
+    console for manual edits (commit prefix ``manual:``). Lock-protected so it
+    cannot interleave with a remember() write or another edit."""
+    with _write_lock:
+        path = resolve_under_root(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        git_commit(message)
+        return path
+
+
+def delete_file(rel: str, message: str) -> bool:
+    """Soft-delete a file (removed from the working tree, kept in git history)
+    and commit. Returns whether the file existed."""
+    with _write_lock:
+        path = resolve_under_root(rel)
+        if not path.is_file():
+            return False
+        path.unlink()
+        git_commit(message)
+        return True
