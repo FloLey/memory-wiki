@@ -192,6 +192,7 @@ def _page(title: str, body: str, *, login: str | None = None, crumb: str = "") -
     if login:
         nav = (
             '<nav><a href="/ui">Overview</a>'
+            '<a href="/ui/dream">Dreams</a>'
             '<a href="/ui/edit">New page</a>'
             '<a href="/ui/logout">Logout</a></nav>'
         )
@@ -457,3 +458,49 @@ def register_ui(
         except WikiPathError:
             return PlainTextResponse("Forbidden.", status_code=403)
         return RedirectResponse("/ui", status_code=303)
+
+    # ---- dreams (consolidation dry-run) ----
+    @mcp.custom_route("/ui/dream", methods=["GET"])
+    async def ui_dream(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return RedirectResponse("/ui/login")
+        from wiki_server.dream import list_reports
+
+        reports = list_reports()
+        rows = "".join(
+            f'<li><a class="name" href="/ui/page/{quote(r)}">{html.escape(r.rsplit("/", 1)[-1])}</a></li>'
+            for r in reports
+        )
+        reports_html = (
+            f'<section class="card"><h2>Reports</h2><ul class="filelist">{rows}</ul></section>'
+            if reports
+            else "<p class='muted'>No dream reports yet.</p>"
+        )
+        token = csrf_token(login)
+        run_form = (
+            '<form method="post" action="/ui/dream/run">'
+            f'<input type="hidden" name="csrf" value="{token}">'
+            '<button class="btn" type="submit">Run a dream (dry-run)</button>'
+            '</form>'
+        )
+        body = (
+            "<p class='muted'>A dry-run proposes how to consolidate short-term memory "
+            "into long-term pages. It writes a report and changes nothing.</p>"
+            f"<div class='toolbar'>{run_form}</div>{reports_html}"
+        )
+        return _page("Dreams", body, login=login)
+
+    @mcp.custom_route("/ui/dream/run", methods=["POST"])
+    async def ui_dream_run(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        if not csrf_ok(login, form.get("csrf")):
+            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        from starlette.concurrency import run_in_threadpool
+        from wiki_server.dream import run_dry_run
+
+        rel, _ = await run_in_threadpool(run_dry_run)
+        return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)

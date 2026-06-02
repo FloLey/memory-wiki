@@ -10,6 +10,18 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
+## Status: Slice 7 (consolidation daemon, dry-run)
+
+Slice 7 adds the **dream**: a consolidation pass that reads short-term memory and
+the policy (`DREAM.md`) and proposes how to distil captures into long-term pages.
+It runs as a **dry-run** for now: it writes a report to `dream_reports/` and
+**changes nothing**. Trigger it from the console at `/ui/dream` (a "Run a dream"
+button) and read the report there. The policy `DREAM.md` ships with a default and
+is seeded into the wiki on first run (never overwriting an edited one); tune it in
+`/ui`. The model is configurable via `WIKI_DREAM_MODEL` (defaults to Opus) and
+needs `ANTHROPIC_API_KEY`. Execution (actually applying the plan) is a later
+slice, deliberately after iterating on the policy via dry-runs.
+
 ## Status: Slice 6 (lean tool surface)
 
 Slice 1 proved the chain end to end. Slice 2 added GitHub OAuth. Slice 3 added
