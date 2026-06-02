@@ -77,46 +77,136 @@ def _verify(secret: str, token: str | None) -> dict | None:
 # ----------------------------------------------------------------------------
 
 _CSS = """
-:root { color-scheme: light dark; }
-body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto;
-       padding: 1.5rem; line-height: 1.5; }
-header { display: flex; justify-content: space-between; align-items: baseline;
-         border-bottom: 1px solid #8884; padding-bottom: .5rem; margin-bottom: 1rem; }
-header a { margin-left: 1rem; }
-nav a { margin-right: 1rem; }
-article { border: 1px solid #8884; border-radius: 8px; padding: 1rem; overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; }
-th, td { border: 1px solid #8884; padding: .35rem .6rem; text-align: left; }
-textarea { width: 100%; min-height: 60vh; font-family: ui-monospace, monospace;
-           font-size: .9rem; box-sizing: border-box; }
-input[type=text] { width: 100%; font-family: ui-monospace, monospace; box-sizing: border-box; }
-.btn { display: inline-block; padding: .4rem .8rem; border: 1px solid #8888;
-       border-radius: 6px; text-decoration: none; cursor: pointer; background: #8881; }
-.danger { color: #c0392b; border-color: #c0392b; }
-ul.tree { list-style: none; padding-left: 0; font-family: ui-monospace, monospace; }
-ul.tree li { padding: .1rem 0; }
-.muted { opacity: .6; font-size: .85rem; }
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70;
+  --line: #e3e3e0; --accent: #3a6ea5; --accent-ink: #fff; --danger: #c0392b;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.04);
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a; --panel: #1f2126; --ink: #e8e8ea; --muted: #9a9aa2;
+    --line: #2c2f36; --accent: #6ea8e0; --accent-ink: #10131a; --danger: #e57373;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .inner {
+  max-width: 820px; margin: 0 auto; padding: .8rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.brand { font-weight: 700; letter-spacing: -.01em; text-decoration: none; color: var(--ink); }
+.brand span { color: var(--accent); }
+.topbar nav a { color: var(--muted); text-decoration: none; margin-left: 1rem; font-size: .92rem; }
+.topbar nav a:hover { color: var(--ink); }
+.who { color: var(--muted); font-size: .85rem; margin-right: .25rem; }
+main { max-width: 820px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
+h1 { font-size: 1.5rem; letter-spacing: -.02em; margin: .2rem 0 1.25rem; }
+h1 .crumb { color: var(--muted); font-weight: 500; }
+a { color: var(--accent); }
+.muted { color: var(--muted); font-size: .85rem; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 1rem 1.25rem; margin-bottom: 1.1rem;
+}
+.card h2 {
+  font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin: 0 0 .6rem; font-weight: 600;
+}
+.filelist { list-style: none; margin: 0; padding: 0; }
+.filelist li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .4rem 0; border-top: 1px solid var(--line); gap: .75rem;
+}
+.filelist li:first-child { border-top: 0; }
+.filelist a.name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9rem;
+  text-decoration: none; color: var(--ink); overflow-wrap: anywhere;
+}
+.filelist a.name:hover { color: var(--accent); }
+.filelist a.edit { font-size: .8rem; color: var(--muted); text-decoration: none; flex-shrink: 0; }
+.filelist a.edit:hover { color: var(--accent); }
+.btn {
+  display: inline-block; padding: .5rem .9rem; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  text-decoration: none; font-size: .9rem; font-weight: 500;
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn:hover { filter: brightness(1.05); }
+.toolbar { display: flex; gap: .6rem; margin-bottom: 1rem; flex-wrap: wrap; }
+article {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 1.25rem 1.5rem; overflow-x: auto;
+}
+article :first-child { margin-top: 0; }
+article h1, article h2, article h3 { letter-spacing: -.01em; }
+article code {
+  background: color-mix(in srgb, var(--ink) 8%, transparent); padding: .1rem .35rem;
+  border-radius: 5px; font-size: .88em;
+}
+article pre { background: color-mix(in srgb, var(--ink) 6%, transparent); padding: 1rem; border-radius: 8px; overflow-x: auto; }
+article pre code { background: none; padding: 0; }
+article table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+article th, article td { border: 1px solid var(--line); padding: .45rem .7rem; text-align: left; }
+article th { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+article blockquote { border-left: 3px solid var(--line); margin: 1rem 0; padding-left: 1rem; color: var(--muted); }
+form { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+       box-shadow: var(--shadow); padding: 1.25rem; }
+label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .3rem; }
+input[type=text], textarea {
+  width: 100%; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .9rem;
+}
+textarea { min-height: 58vh; line-height: 1.5; resize: vertical; }
+.field { margin-bottom: 1rem; }
+.actions { display: flex; gap: .6rem; margin-top: 1rem; align-items: center; }
+.empty { color: var(--muted); text-align: center; padding: 2rem 0; }
+.login-wrap { max-width: 380px; margin: 12vh auto; text-align: center; }
+.login-wrap .card { padding: 2rem 1.5rem; }
 """
 
 
-def _page(title: str, body: str, *, login: str | None = None) -> HTMLResponse:
+_ROOT_GROUP = "_root"
+_CATEGORY_LABELS = {
+    "long_term": "Long-term memory",
+    "short_term": "Short-term memory",
+    _ROOT_GROUP: "Other",
+}
+
+
+def _page(title: str, body: str, *, login: str | None = None, crumb: str = "") -> HTMLResponse:
     nav = ""
-    head_right = ""
+    who = ""
     if login:
         nav = (
             '<nav><a href="/ui">Overview</a>'
-            '<a href="/ui/edit">New page</a></nav>'
+            '<a href="/ui/edit">New page</a>'
+            '<a href="/ui/logout">Logout</a></nav>'
         )
-        head_right = (
-            f'<span class="muted">{html.escape(login)}</span>'
-            '<a class="btn" href="/ui/logout">Logout</a>'
-        )
+        who = f'<span class="who">{html.escape(login)}</span>'
+    heading = html.escape(title)
+    if crumb:
+        heading = f'<span class="crumb">{html.escape(crumb)} /</span> {html.escape(title)}'
     doc = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{html.escape(title)} - Memory Wiki</title><style>{_CSS}</style></head>"
-        f"<body><header><strong>Memory Wiki</strong><span>{head_right}</span></header>"
-        f"{nav}<h1>{html.escape(title)}</h1>{body}</body></html>"
+        "<body><div class='topbar'><div class='inner'>"
+        "<a class='brand' href='/ui'>Memory<span>Wiki</span></a>"
+        f"<div>{who}{nav}</div></div></div>"
+        f"<main><h1>{heading}</h1>{body}</main></body></html>"
     )
     return HTMLResponse(doc)
 
@@ -244,13 +334,27 @@ def register_ui(
         if not login:
             return RedirectResponse("/ui/login")
         files = _list_md_files()
-        items = "".join(
-            f'<li><a href="/ui/page/{quote(f)}">{html.escape(f)}</a> '
-            f'<a class="muted" href="/ui/edit?path={quote(f)}">edit</a></li>'
-            for f in files
-        )
-        tree = f'<ul class="tree">{items}</ul>' if files else "<p class='muted'>No pages yet.</p>"
-        body = f"<p class='muted'>{len(files)} markdown file(s) under the wiki root.</p>{tree}"
+        if not files:
+            body = "<div class='empty'>No pages yet. Use <strong>New page</strong> to add one.</div>"
+            return _page("Overview", body, login=login)
+        groups: dict[str, list[str]] = {}
+        for f in files:
+            top = f.split("/", 1)[0] if "/" in f else _ROOT_GROUP
+            groups.setdefault(top, []).append(f)
+        cards = ""
+        for top in sorted(groups, key=lambda k: (k == _ROOT_GROUP, k)):
+            rows = "".join(
+                f'<li><a class="name" href="/ui/page/{quote(f)}">{html.escape(f)}</a>'
+                f'<a class="edit" href="/ui/edit?path={quote(f)}">edit</a></li>'
+                for f in groups[top]
+            )
+            label = _CATEGORY_LABELS.get(top, top)
+            cards += (
+                f'<section class="card"><h2>{html.escape(label)} '
+                f'<span class="muted">({len(groups[top])})</span></h2>'
+                f'<ul class="filelist">{rows}</ul></section>'
+            )
+        body = f"<p class='muted'>{len(files)} page(s) across your memory.</p>{cards}"
         return _page("Overview", body, login=login)
 
     @mcp.custom_route("/ui/page/{path:path}", methods=["GET"])
@@ -266,11 +370,14 @@ def register_ui(
         if not path.is_file():
             return PlainTextResponse("Not found.", status_code=404)
         rendered = _md.render(path.read_text(encoding="utf-8"))
+        name = rel.rsplit("/", 1)[-1]
+        crumb = rel[: -len(name) - 1] if "/" in rel else ""
         body = (
-            f"<p><a class='btn' href='/ui/edit?path={quote(rel)}'>Edit</a></p>"
+            f"<div class='toolbar'><a class='btn' href='/ui/edit?path={quote(rel)}'>Edit</a>"
+            f"<a class='btn ghost' href='/ui'>Back</a></div>"
             f"<article>{rendered}</article>"
         )
-        return _page(rel, body, login=login)
+        return _page(name, body, login=login, crumb=crumb)
 
     # ---- editing ----
     @mcp.custom_route("/ui/edit", methods=["GET"])
@@ -302,15 +409,21 @@ def register_ui(
                 f'<input type="hidden" name="path" value="{html.escape(rel)}">'
                 f'<button class="btn danger" type="submit">Delete</button></form>'
             )
+        cancel = f"/ui/page/{quote(rel)}" if rel and not is_new else "/ui"
         body = (
             f'<form method="post" action="/ui/save">'
             f'<input type="hidden" name="csrf" value="{token}">'
-            f'<p>Path: {path_field}</p>'
-            f'<textarea name="content">{html.escape(content)}</textarea>'
-            f'<p><button class="btn" type="submit">Save</button> {delete_btn}</p>'
+            f'<div class="field"><label>Path</label>{path_field}</div>'
+            f'<div class="field"><label>Content (markdown)</label>'
+            f'<textarea name="content">{html.escape(content)}</textarea></div>'
+            f'<div class="actions"><button class="btn" type="submit">Save</button>'
+            f'<a class="btn ghost" href="{cancel}">Cancel</a>{delete_btn}</div>'
             f'</form>'
         )
-        return _page("New page" if is_new else f"Edit: {rel}", body, login=login)
+        name = rel.rsplit("/", 1)[-1] if rel else ""
+        crumb = rel[: -len(name) - 1] if rel and "/" in rel else ""
+        title = "New page" if is_new else f"Edit {name}"
+        return _page(title, body, login=login, crumb=crumb)
 
     @mcp.custom_route("/ui/save", methods=["POST"])
     async def ui_save(request: Request) -> Response:
