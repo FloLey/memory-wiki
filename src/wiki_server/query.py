@@ -11,7 +11,7 @@ from __future__ import annotations
 from wiki_server.paths import resolve_under_root, wiki_root
 
 # Self pages, in the order Claude should read them to ground itself.
-_SELF_ORDER = ["identity.md", "style.md", "familiars.md"]
+_SELF_ORDER = ["identity.md", "style.md", "voices.md", "familiars.md"]
 
 
 def _safe_read(path) -> str:
@@ -31,6 +31,23 @@ def _iter_wiki_md():
         if p.is_relative_to(private_dir) or p.is_relative_to(git_dir):
             continue
         yield p.relative_to(root).as_posix(), p
+
+
+def list_pages() -> list[str]:
+    """All readable markdown page paths (relative to the wiki root)."""
+    return [rel for rel, _ in _iter_wiki_md()]
+
+
+def find_pages_by_name(name: str, pages: list[str] | None = None) -> list[str]:
+    """Pages whose filename matches ``name`` (basename, case-insensitive).
+    Lets a caller recover from a path missing its directory prefix. An optional
+    pre-fetched ``pages`` list avoids a second disk scan."""
+    base = name.rsplit("/", 1)[-1].strip().lower()
+    if not base:
+        return []
+    if pages is None:
+        pages = list_pages()
+    return [rel for rel in pages if rel.rsplit("/", 1)[-1].lower() == base]
 
 
 def build_prime() -> str:

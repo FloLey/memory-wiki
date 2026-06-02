@@ -10,33 +10,30 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
-## Status: Slice 5 (rich reading for Claude)
+## Status: Slice 6 (lean tool surface)
 
-Slice 1 proved the chain end to end (remote MCP server over HTTPS, connected to
-Claude.ai). Slice 2 closed the open door with GitHub OAuth. Slice 3 made the
-wiki start living (short-term memory). Slice 4 added a private **web console** at
-`/ui`. Slice 5 gives Claude rich reading: open any page, search the whole wiki,
-and load all grounding context in one call.
+Slice 1 proved the chain end to end. Slice 2 added GitHub OAuth. Slice 3 added
+short-term memory. Slice 4 added the web console at `/ui`. Slice 5 added rich
+reading. Slice 6 **consolidates the MCP surface to four tools**: a small surface
+is easier for the model to use correctly (fewer ways to pick the wrong tool).
 
 MCP tools (for Claude):
 
-- `ping(message)` - connectivity check, echoes the message back.
-- `prime()` - one call that loads the grounding context: the `self/` pages
-  (identity, style, familiars) then the long-term and short-term indexes. Call
-  it at the start of a conversation.
-- `read_long_term_index()` - reads `long_term/index.md`.
-- `read_long_term_page(path)` - reads any page by its path under the wiki root.
-- `read_short_term_index()` - reads the short-term index table.
-- `read_short_term_entry(id)` - reads one short-term entry in full.
-- `search_wiki(query_text, max_results?)` - full-text search across the wiki,
-  returning `path:line: text` matches.
-- `remember(content, summary?, tags?)` - captures something into short-term
-  memory: writes `short_term/entries/{id}.md`, appends a row to the index, and
-  commits with a `stm:` prefix.
-- `GET /health` - liveness probe for the Docker healthcheck (public).
+- `prime()` - call FIRST: loads the grounding context (the `self/` pages then the
+  long-term and short-term indexes) in one call.
+- `read(path)` - read any file: a page, an index, or a short-term entry. Tolerant
+  of paths (a bare `self/identity.md` works) and suggests alternatives on a miss
+  rather than asserting a file does not exist.
+- `search(query_text, max_results?)` - full-text search, returning
+  `path:line: text` matches.
+- `remember(content, summary?, tags?)` - capture into short-term memory: writes
+  `short_term/entries/{id}.md`, appends to the index, commits with `stm:`.
+- `GET /health` - liveness probe for the Docker healthcheck (public, not a tool).
 
-All read tools (and `remember`) honour the owner allow-list and the path guard,
-so `long_term/private/` is never read or searched.
+Writing to long-term memory is intentionally not an MCP tool: it happens through
+the web console (`manual:`) or the future nightly daemon, not a live
+conversation. All tools honour the owner allow-list and the path guard, so
+`long_term/private/` is never read or searched.
 
 Short-term memory is the open, fast-to-write layer. It accumulates as you talk;
 a later consolidation phase will distil it into curated long-term pages. Over

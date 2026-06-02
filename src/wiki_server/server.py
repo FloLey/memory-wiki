@@ -122,81 +122,59 @@ register_ui(
 
 
 @mcp.tool
-def ping(message: str = "pong") -> str:
-    """Connectivity check. Echoes the message back so you can confirm the
-    Personal Memory Wiki MCP server is reachable.
-    """
-    return f"personal-memory-wiki is alive: {message}"
-
-
-@mcp.tool
-def read_long_term_index() -> str:
-    """Read the long-term memory catalog (``long_term/index.md``).
-
-    This is the entry point for navigating the wiki: it lists the durable,
-    curated knowledge pages by category. Read it first to know the terrain.
-    """
-    path = resolve_under_root("long_term/index.md")
-    if not path.is_file():
-        return "long_term/index.md does not exist yet."
-    return path.read_text(encoding="utf-8")
-
-
-@mcp.tool
-def read_long_term_page(path: str) -> str:
-    """Read a single page by its path relative to the wiki root, e.g.
-    ``long_term/self/identity.md``. Use the index or search to find paths.
-    """
-    try:
-        target = resolve_under_root(path)
-    except WikiPathError:
-        return f"Path not allowed: {path}"
-    if not target.is_file():
-        return f"Page {path} does not exist."
-    try:
-        return target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return f"Error reading page {path}: {exc}"
-
-
-@mcp.tool
 def prime() -> str:
-    """Load everything needed to ground a conversation in one call: the self
-    pages (identity, style, familiars), then the long-term and short-term
-    indexes. Call this once at the start of a conversation to know the terrain.
+    """Call this FIRST, at the very start of every conversation, before anything
+    else. It returns the full text of the self pages (identity, style, voices,
+    familiars) plus the long-term and short-term indexes in one call, so you know
+    who the user is and the lay of the land. Then use search and read to go deeper.
     """
     return query.build_prime()
 
 
 @mcp.tool
-def search_wiki(query_text: str, max_results: int = 30) -> str:
-    """Full-text search across the whole wiki. Returns matching lines as
+def read(path: str) -> str:
+    """Read any file in the memory by its path: a page, an index, or a short-term
+    entry. Examples: ``long_term/index.md``, ``long_term/self/identity.md``,
+    ``short_term/index.md``, ``short_term/entries/1.md``.
+
+    Tolerant of paths: a bare path like ``self/identity.md`` (as written in index
+    links) is accepted. If nothing is found it returns suggestions, never a bare
+    "does not exist", so never conclude a file is missing from a single attempt.
+    """
+    path = path.strip().strip("'\"")
+    if not path:
+        return "Error: empty path."
+    # Try the path as given, then with the long_term/ prefix (index links are
+    # written relative to long_term/, not the wiki root).
+    candidates = [path]
+    if not path.startswith(("long_term/", "short_term/")):
+        candidates.append(f"long_term/{path}")
+    for candidate in candidates:
+        try:
+            target = resolve_under_root(candidate)
+        except WikiPathError:
+            continue
+        if target.is_file():
+            try:
+                return target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return f"Error reading {candidate}: {exc}"
+    # Not found: suggest by filename, else list what exists. Never claim absence.
+    pages = query.list_pages()
+    matches = query.find_pages_by_name(path, pages)
+    if matches:
+        return f"No file at {path!r}. Did you mean: {', '.join(matches)} ?"
+    listing = ", ".join(pages[:20]) if pages else "(none)"
+    return f"No file at {path!r}. Existing pages: {listing}"
+
+
+@mcp.tool
+def search(query_text: str, max_results: int = 30) -> str:
+    """Full-text search across the whole memory. Returns matching lines as
     ``path:line: text``. Use it to find where something is mentioned, then open
-    the page with read_long_term_page.
+    the file with read.
     """
     return query.search_wiki(query_text, max_results=max_results)
-
-
-@mcp.tool
-def read_short_term_index() -> str:
-    """Read the short-term memory index (``short_term/index.md``).
-
-    A table of recent captures: id, time, a one-line summary, and tags. The
-    summary is usually enough; open the full entry only when you need detail.
-    """
-    path = resolve_under_root("short_term/index.md")
-    if not path.is_file():
-        return "short_term/index.md does not exist yet."
-    return path.read_text(encoding="utf-8")
-
-
-@mcp.tool
-def read_short_term_entry(entry_id: int) -> str:
-    """Read the full text of a single short-term entry by its id."""
-    path = resolve_under_root(f"short_term/entries/{entry_id}.md")
-    if not path.is_file():
-        return f"Short-term entry {entry_id} does not exist."
-    return path.read_text(encoding="utf-8")
 
 
 @mcp.tool
