@@ -1,0 +1,86 @@
+"""Read and search helpers for the Personal Memory Wiki.
+
+These back the MCP read tools that let Claude ground itself: a one-call context
+loader (``build_prime``) and a full-text search (``search_wiki``). Search is a
+simple pure-Python scan, which is plenty for a personal wiki of dozens of pages;
+it can be swapped for ripgrep later if it ever feels slow.
+"""
+
+from __future__ import annotations
+
+from wiki_server.paths import resolve_under_root, wiki_root
+
+# Self pages, in the order Claude should read them to ground itself.
+_SELF_ORDER = ["identity.md", "style.md", "familiars.md"]
+
+
+def _safe_read(path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _iter_wiki_md():
+    """Yield (relative_path, Path) for every readable markdown file, skipping
+    .git and the invisible long_term/private/ area."""
+    root = wiki_root()
+    private_dir = root / "long_term" / "private"
+    git_dir = root / ".git"
+    for p in sorted(root.rglob("*.md")):
+        if p.is_relative_to(private_dir) or p.is_relative_to(git_dir):
+            continue
+        yield p.relative_to(root).as_posix(), p
+
+
+def build_prime() -> str:
+    """Bundle the grounding context into one string: the self pages, then the
+    long-term and short-term indexes."""
+    sections: list[str] = []
+
+    self_dir = resolve_under_root("long_term/self")
+    if self_dir.is_dir():
+        seen = set()
+        ordered = []
+        for name in _SELF_ORDER:
+            sp = self_dir / name
+            if sp.is_file():
+                ordered.append(sp)
+                seen.add(sp.name)
+        for sp in sorted(self_dir.glob("*.md")):
+            if sp.name not in seen:
+                ordered.append(sp)
+        for sp in ordered:
+            rel = sp.relative_to(wiki_root()).as_posix()
+            sections.append(f"## {rel}\n\n{_safe_read(sp)}")
+
+    for rel in ("long_term/index.md", "short_term/index.md"):
+        p = resolve_under_root(rel)
+        if p.is_file():
+            sections.append(f"## {rel}\n\n{_safe_read(p)}")
+
+    if not sections:
+        return "The wiki is empty."
+    return "\n\n---\n\n".join(sections)
+
+
+def search_wiki(query: str, max_results: int = 30) -> str:
+    """Case-insensitive full-text search. Returns matching lines as
+    ``path:line: text``, or a message when there is no match."""
+    needle = query.strip().lower()
+    if not needle:
+        return "Empty query."
+    max_results = max(1, max_results)
+    results: list[str] = []
+    for rel, path in _iter_wiki_md():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for i, line in enumerate(lines, 1):
+            if needle in line.lower():
+                results.append(f"{rel}:{i}: {line.strip()}")
+                if len(results) >= max_results:
+                    results.append(f"... (stopped at {max_results} matches)")
+                    return "\n".join(results)
+    return "\n".join(results) if results else f"No matches for {query!r}."

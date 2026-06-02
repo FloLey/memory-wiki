@@ -29,7 +29,8 @@ from fastmcp.server.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from wiki_server.paths import resolve_under_root
+from wiki_server import query
+from wiki_server.paths import WikiPathError, resolve_under_root
 from wiki_server.store import write_stm_entry
 from wiki_server.ui import register_ui
 
@@ -139,6 +140,41 @@ def read_long_term_index() -> str:
     if not path.is_file():
         return "long_term/index.md does not exist yet."
     return path.read_text(encoding="utf-8")
+
+
+@mcp.tool
+def read_long_term_page(path: str) -> str:
+    """Read a single page by its path relative to the wiki root, e.g.
+    ``long_term/self/identity.md``. Use the index or search to find paths.
+    """
+    try:
+        target = resolve_under_root(path)
+    except WikiPathError:
+        return f"Path not allowed: {path}"
+    if not target.is_file():
+        return f"Page {path} does not exist."
+    try:
+        return target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"Error reading page {path}: {exc}"
+
+
+@mcp.tool
+def prime() -> str:
+    """Load everything needed to ground a conversation in one call: the self
+    pages (identity, style, familiars), then the long-term and short-term
+    indexes. Call this once at the start of a conversation to know the terrain.
+    """
+    return query.build_prime()
+
+
+@mcp.tool
+def search_wiki(query_text: str, max_results: int = 30) -> str:
+    """Full-text search across the whole wiki. Returns matching lines as
+    ``path:line: text``. Use it to find where something is mentioned, then open
+    the page with read_long_term_page.
+    """
+    return query.search_wiki(query_text, max_results=max_results)
 
 
 @mcp.tool
