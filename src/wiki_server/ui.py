@@ -465,7 +465,7 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        from wiki_server.dream import list_reports
+        from wiki_server.dream import list_reports, usage_summary
 
         reports = list_reports()
         rows = "".join(
@@ -477,6 +477,19 @@ def register_ui(
             if reports
             else "<p class='muted'>No dream reports yet.</p>"
         )
+        u = usage_summary()
+        cost_html = (
+            '<section class="card"><h2>Cost (estimated)</h2>'
+            '<table><tbody>'
+            f'<tr><th>Total</th><td>${u["total_cost"]:.4f} over {u["runs"]} run(s)</td></tr>'
+            f'<tr><th>Per night (last)</th><td>${u["last_cost"]:.4f}</td></tr>'
+            f'<tr><th>Per night (avg)</th><td>${u["avg_cost"]:.4f}</td></tr>'
+            f'<tr><th>Tokens</th><td>{u["input_tokens"]:,} in / {u["output_tokens"]:,} out</td></tr>'
+            '</tbody></table>'
+            '<p class="muted">Token counts are exact; cost is estimated from '
+            'WIKI_DREAM_PRICE_INPUT / WIKI_DREAM_PRICE_OUTPUT (per 1M tokens).</p>'
+            '</section>'
+        )
         token = csrf_token(login)
         run_form = (
             '<form method="post" action="/ui/dream/run">'
@@ -487,7 +500,7 @@ def register_ui(
         body = (
             "<p class='muted'>A dry-run proposes how to consolidate short-term memory "
             "into long-term pages. It writes a report and changes nothing.</p>"
-            f"<div class='toolbar'>{run_form}</div>{reports_html}"
+            f"<div class='toolbar'>{run_form}</div>{cost_html}{reports_html}"
         )
         return _page("Dreams", body, login=login)
 

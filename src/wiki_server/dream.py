@@ -12,14 +12,25 @@ policy is never overwritten).
 from __future__ import annotations
 
 import datetime
+import json
 import os
+import threading
 
 from wiki_server.paths import resolve_under_root
-from wiki_server.store import write_file
+from wiki_server.store import write_file, write_files
+
+# Serializes a whole dream run, so concurrent triggers cannot double-call the API
+# or lose-update the usage ledger (read-append-write).
+_dream_lock = threading.Lock()
 
 DREAM_POLICY = "DREAM.md"
 DREAM_REPORTS_DIR = "dream_reports"
+USAGE_FILE = "dream_reports/usage.json"
 DEFAULT_MODEL = "claude-opus-4-8"
+# Estimated prices per 1M tokens, configurable per model via env. Token counts
+# are exact (from the API); cost is an estimate based on these prices.
+DEFAULT_PRICE_INPUT = 15.0
+DEFAULT_PRICE_OUTPUT = 75.0
 
 DEFAULT_DREAM_MD = """# DREAM.md
 
@@ -139,10 +150,12 @@ contenu rédigé proposé pour la page. Termine par les éventuelles réorganisa
 liens à créer, et mises à jour de l'index que tu proposerais."""
 
 
-def _ask_model(prompt: str) -> str:
+def _ask_model(prompt: str) -> tuple[str, int, int]:
+    """Returns (text, input_tokens, output_tokens). Token counts are 0 when no
+    real API call happened (missing key or error)."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "ANTHROPIC_API_KEY is not set; cannot run the dream. Add it as a secret."
+        return "ANTHROPIC_API_KEY is not set; cannot run the dream. Add it as a secret.", 0, 0
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -153,28 +166,84 @@ def _ask_model(prompt: str) -> str:
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        return "".join(block.text for block in message.content if block.type == "text")
+        text = "".join(block.text for block in message.content if block.type == "text")
+        usage = getattr(message, "usage", None)
+        return text, getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0
     except Exception as exc:
-        return f"The dream could not reach the model ({model}): {exc}"
+        return f"The dream could not reach the model ({model}): {exc}", 0, 0
+
+
+def _price(env_name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(env_name) or default)
+    except (ValueError, TypeError):
+        return default
+
+
+def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
+    price_in = _price("WIKI_DREAM_PRICE_INPUT", DEFAULT_PRICE_INPUT)
+    price_out = _price("WIKI_DREAM_PRICE_OUTPUT", DEFAULT_PRICE_OUTPUT)
+    return input_tokens / 1_000_000 * price_in + output_tokens / 1_000_000 * price_out
+
+
+def read_usage() -> list[dict]:
+    path = resolve_under_root(USAGE_FILE)
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (ValueError, OSError):
+        return []
+
+
+def usage_summary() -> dict:
+    """Aggregate cost/token stats across all dream runs."""
+    entries = read_usage()
+    total_cost = sum(float(e.get("cost", 0)) for e in entries)
+    runs = len(entries)
+    return {
+        "runs": runs,
+        "total_cost": total_cost,
+        "last_cost": float(entries[-1].get("cost", 0)) if entries else 0.0,
+        "avg_cost": total_cost / runs if runs else 0.0,
+        "input_tokens": sum(int(e.get("input_tokens", 0)) for e in entries),
+        "output_tokens": sum(int(e.get("output_tokens", 0)) for e in entries),
+    }
 
 
 def run_dry_run() -> tuple[str, str]:
     """Run a consolidation dry-run. Returns (report_relative_path, report_text).
-    Writes the report into the wiki and commits it. Modifies nothing else."""
-    policy = ensure_policy()
-    stm_entries = _read_stm_entries()
-    date = datetime.date.today().isoformat()
+    Writes the report (and a usage ledger entry) in one commit. Modifies nothing
+    else."""
+    with _dream_lock:
+        policy = ensure_policy()
+        stm_entries = _read_stm_entries()
+        date = datetime.datetime.now(datetime.timezone.utc)
+        day = date.date().isoformat()
 
-    if not stm_entries:
-        body = "Short-term memory is empty. Nothing to consolidate."
-    else:
-        ltm_index = _read("long_term/index.md")
-        body = _ask_model(_build_prompt(policy, stm_entries, ltm_index))
+        usage_entry = None
+        if not stm_entries:
+            body = "Short-term memory is empty. Nothing to consolidate."
+        else:
+            ltm_index = _read("long_term/index.md")
+            body, in_tok, out_tok = _ask_model(_build_prompt(policy, stm_entries, ltm_index))
+            if in_tok or out_tok:
+                usage_entry = {
+                    "timestamp": date.replace(microsecond=0).isoformat(),
+                    "model": os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
+                    "cost": round(_estimate_cost(in_tok, out_tok), 6),
+                }
 
-    report = f"# Dream dry-run, {date}\n\n{body}\n"
-    rel = f"{DREAM_REPORTS_DIR}/{date}-dryrun.md"
-    write_file(rel, report, f"dream: dry-run report {date}")
-    return rel, report
+        report = f"# Dream dry-run, {day}\n\n{body}\n"
+        rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
+        files = {rel: report}
+        if usage_entry is not None:
+            files[USAGE_FILE] = json.dumps(read_usage() + [usage_entry], indent=2)
+        write_files(files, f"dream: dry-run report {day}")
+        return rel, report
 
 
 def list_reports() -> list[str]:

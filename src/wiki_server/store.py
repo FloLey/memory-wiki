@@ -130,6 +130,17 @@ def write_file(rel: str, content: str, message: str):
         return path
 
 
+def write_files(files: dict[str, str], message: str) -> None:
+    """Write several files and record them in a single commit. Lock-protected.
+    Used by the dream so a run is one commit (report + usage ledger)."""
+    with _write_lock:
+        for rel, content in files.items():
+            path = resolve_under_root(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        git_commit(message)
+
+
 def delete_file(rel: str, message: str) -> bool:
     """Soft-delete a file (removed from the working tree, kept in git history)
     and commit. Returns whether the file existed."""
