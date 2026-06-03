@@ -27,10 +27,14 @@ DREAM_POLICY = "DREAM.md"
 DREAM_REPORTS_DIR = "dream_reports"
 USAGE_FILE = "dream_reports/usage.json"
 DEFAULT_MODEL = "claude-opus-4-8"
-# Estimated prices per 1M tokens, configurable per model via env. Token counts
-# are exact (from the API); cost is an estimate based on these prices.
-DEFAULT_PRICE_INPUT = 15.0
-DEFAULT_PRICE_OUTPUT = 75.0
+
+# Anthropic list prices per 1M tokens (USD), by model tier (2026). Hardcoded so
+# there is nothing to configure. Unknown / self-hosted models price at 0.
+_PRICES = {
+    "opus": (5.0, 25.0),
+    "sonnet": (3.0, 15.0),
+    "haiku": (1.0, 5.0),
+}
 
 DEFAULT_DREAM_MD = """# DREAM.md
 
@@ -173,16 +177,18 @@ def _ask_model(prompt: str) -> tuple[str, int, int]:
         return f"The dream could not reach the model ({model}): {exc}", 0, 0
 
 
-def _price(env_name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(env_name) or default)
-    except (ValueError, TypeError):
-        return default
+def _prices_for(model: str) -> tuple[float, float]:
+    """(input, output) price per 1M tokens for a model, by tier. Unknown or
+    self-hosted models return (0, 0) since there is no known API price."""
+    name = (model or "").lower()
+    for tier, prices in _PRICES.items():
+        if tier in name:
+            return prices
+    return (0.0, 0.0)
 
 
-def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    price_in = _price("WIKI_DREAM_PRICE_INPUT", DEFAULT_PRICE_INPUT)
-    price_out = _price("WIKI_DREAM_PRICE_OUTPUT", DEFAULT_PRICE_OUTPUT)
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    price_in, price_out = _prices_for(model)
     return input_tokens / 1_000_000 * price_in + output_tokens / 1_000_000 * price_out
 
 
@@ -229,12 +235,13 @@ def run_dry_run() -> tuple[str, str]:
             ltm_index = _read("long_term/index.md")
             body, in_tok, out_tok = _ask_model(_build_prompt(policy, stm_entries, ltm_index))
             if in_tok or out_tok:
+                model = os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL
                 usage_entry = {
                     "timestamp": date.replace(microsecond=0).isoformat(),
-                    "model": os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL,
+                    "model": model,
                     "input_tokens": in_tok,
                     "output_tokens": out_tok,
-                    "cost": round(_estimate_cost(in_tok, out_tok), 6),
+                    "cost": round(_estimate_cost(model, in_tok, out_tok), 6),
                 }
 
         report = f"# Dream dry-run, {day}\n\n{body}\n"

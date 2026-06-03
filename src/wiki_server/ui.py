@@ -103,7 +103,8 @@ body {
 }
 .topbar .inner {
   max-width: 820px; margin: 0 auto; padding: .8rem 1.25rem;
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem 1rem; flex-wrap: wrap;
 }
 .brand { font-weight: 700; letter-spacing: -.01em; text-decoration: none; color: var(--ink); }
 .brand span { color: var(--accent); }
@@ -118,6 +119,7 @@ a { color: var(--accent); }
 .card {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 1rem 1.25rem; margin-bottom: 1.1rem;
+  overflow-x: auto;
 }
 .card h2 {
   font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
@@ -175,6 +177,19 @@ textarea { min-height: 58vh; line-height: 1.5; resize: vertical; }
 .empty { color: var(--muted); text-align: center; padding: 2rem 0; }
 .login-wrap { max-width: 380px; margin: 12vh auto; text-align: center; }
 .login-wrap .card { padding: 2rem 1.5rem; }
+
+@media (max-width: 640px) {
+  .topbar .inner { flex-direction: column; align-items: flex-start; gap: .35rem; }
+  .topbar nav { margin-top: .1rem; }
+  .topbar nav a { margin-left: 0; margin-right: 1rem; }
+  .who { display: block; }
+  main { padding: 1.25rem 1rem 3rem; }
+  h1 { font-size: 1.3rem; }
+  .card { padding: .9rem 1rem; }
+  .filelist li { flex-wrap: wrap; gap: .2rem .6rem; }
+  textarea { min-height: 50vh; }
+  .toolbar { gap: .5rem; }
+}
 """
 
 
@@ -319,14 +334,23 @@ def register_ui(
         session = _sign(secret_key, {"login": github_login, "exp": time.time() + SESSION_TTL})
         resp = RedirectResponse("/ui", status_code=303)
         resp.set_cookie(SESSION_COOKIE, session, max_age=SESSION_TTL, httponly=True, secure=True, samesite="lax", path="/ui")
-        resp.delete_cookie(STATE_COOKIE, path="/ui")
+        resp.delete_cookie(STATE_COOKIE, path="/ui", secure=True, httponly=True, samesite="lax")
         return resp
 
     @mcp.custom_route("/ui/logout", methods=["GET"])
     async def ui_logout(request: Request) -> Response:
-        resp = RedirectResponse("/ui/login", status_code=303)
-        resp.delete_cookie(SESSION_COOKIE, path="/ui")
-        return resp
+        # Land on a standalone page rather than /ui/login: redirecting into the
+        # login flow would silently re-authenticate via the still-active GitHub
+        # session, making logout look like a no-op.
+        page = _page(
+            "Logged out",
+            "<div class='login-wrap'><div class='card'>"
+            "<p>You are logged out.</p>"
+            "<p><a class='btn' href='/ui/login'>Log in again</a></p>"
+            "</div></div>",
+        )
+        page.delete_cookie(SESSION_COOKIE, path="/ui", secure=True, httponly=True, samesite="lax")
+        return page
 
     # ---- consultation ----
     @mcp.custom_route("/ui", methods=["GET"])
@@ -487,7 +511,7 @@ def register_ui(
             f'<tr><th>Tokens</th><td>{u["input_tokens"]:,} in / {u["output_tokens"]:,} out</td></tr>'
             '</tbody></table>'
             '<p class="muted">Token counts are exact; cost is estimated from '
-            'WIKI_DREAM_PRICE_INPUT / WIKI_DREAM_PRICE_OUTPUT (per 1M tokens).</p>'
+            'Anthropic list prices for the model (per 1M tokens).</p>'
             '</section>'
         )
         token = csrf_token(login)
