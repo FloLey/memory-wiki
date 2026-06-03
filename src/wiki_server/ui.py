@@ -515,16 +515,24 @@ def register_ui(
             '</section>'
         )
         token = csrf_token(login)
-        run_form = (
+        dry_form = (
             '<form method="post" action="/ui/dream/run">'
             f'<input type="hidden" name="csrf" value="{token}">'
-            '<button class="btn" type="submit">Run a dream (dry-run)</button>'
+            '<button class="btn ghost" type="submit">Run a dream (dry-run)</button>'
+            '</form>'
+        )
+        exec_form = (
+            '<form method="post" action="/ui/dream/execute" '
+            "onsubmit=\"return confirm('Apply the dream? It will modify your memory (one revertible commit).')\">"
+            f'<input type="hidden" name="csrf" value="{token}">'
+            '<button class="btn" type="submit">Execute a dream (apply)</button>'
             '</form>'
         )
         body = (
-            "<p class='muted'>A dry-run proposes how to consolidate short-term memory "
-            "into long-term pages. It writes a report and changes nothing.</p>"
-            f"<div class='toolbar'>{run_form}</div>{cost_html}{reports_html}"
+            "<p class='muted'>A dry-run proposes a consolidation and changes nothing. "
+            "Execute applies it: files short-term memory into long-term pages and "
+            "temporal items, in one revertible commit. Nothing is ever deleted.</p>"
+            f"<div class='toolbar'>{dry_form}{exec_form}</div>{cost_html}{reports_html}"
         )
         return _page("Dreams", body, login=login)
 
@@ -540,4 +548,18 @@ def register_ui(
         from wiki_server.dream import run_dry_run
 
         rel, _ = await run_in_threadpool(run_dry_run)
+        return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
+
+    @mcp.custom_route("/ui/dream/execute", methods=["POST"])
+    async def ui_dream_execute(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        if not csrf_ok(login, form.get("csrf")):
+            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        from starlette.concurrency import run_in_threadpool
+        from wiki_server.dream import run_execute
+
+        rel, _ = await run_in_threadpool(run_execute)
         return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)

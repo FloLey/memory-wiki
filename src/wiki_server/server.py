@@ -178,17 +178,25 @@ def search(query_text: str, max_results: int = 30) -> str:
 
 
 @mcp.tool
-def remember(content: str, summary: str = "", tags: list[str] | None = None) -> str:
-    """Capture something durable into short-term memory.
+def remember(
+    content: str,
+    summary: str = "",
+    tags: list[str] | None = None,
+    due: str | None = None,
+    type: str | None = None,
+) -> str:
+    """Capture something into short-term memory. The nightly daemon sorts it
+    later (into a long-term page, or into temporal/ if it is dated or actionable).
 
-    Use this when the user mentions something worth keeping: a fact about them,
-    a decision, a preference, an ongoing project. ``content`` is the text to
-    store, ``summary`` is an optional one-line label for the index (derived from
-    the first line if omitted), and ``tags`` is an optional list of short tags.
+    Use it whenever the user mentions something worth keeping: a fact, a decision,
+    a preference, a project, but also a task, a reminder, an event, or a temporary
+    thing. For dated or actionable items, set ``due`` (a date like 2026-06-15) and
+    ``type`` (one of: todo, reminder, event, souvenir). ``summary`` is an optional
+    one-line label and ``tags`` an optional list of short tags.
     """
     if not content.strip():
         raise ToolError("Nothing to remember: content is empty.")
-    entry_id, created = write_stm_entry(content, summary=summary, tags=tags)
+    entry_id, created = write_stm_entry(content, summary=summary, tags=tags, due=due, kind=type)
     return f"Remembered as short-term entry {entry_id} ({created})."
 
 

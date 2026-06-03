@@ -10,6 +10,22 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
+## Status: Slice 8 (temporal items + dream execution)
+
+Adds two things:
+
+- **Temporal items** (`temporal/`): dated, transient things (todo, reminder,
+  event, souvenir) that live until a date or until done, then are archived.
+  `remember` takes optional `due` and `type`; the daemon files dated captures here
+  rather than into long-term knowledge; `prime()` surfaces the active ones.
+- **Dream execution**: the dream can now **apply** a plan (not just propose). The
+  model returns a structured JSON plan (full page contents, temporal items, the
+  new index, which short-term entries were consumed); the applier writes pages,
+  creates temporal items, updates the index, drops consumed short-term entries,
+  expires past-due temporal items, all in **one revertible commit**. It never
+  deletes long-term content. The dry-run stays; `/ui/dream` has both a dry-run
+  and an "Execute" button.
+
 ## Status: Slice 7 (consolidation daemon, dry-run)
 
 Slice 7 adds the **dream**: a consolidation pass that reads short-term memory and

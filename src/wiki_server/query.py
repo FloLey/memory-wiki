@@ -76,6 +76,18 @@ def build_prime() -> str:
         if p.is_file():
             sections.append(f"## {rel}\n\n{_safe_read(p)}")
 
+    # Active temporal items (todos, reminders, events, temporary memories).
+    from wiki_server import temporal
+
+    active = temporal.list_items(active_only=True)
+    if active:
+        lines = [
+            f"- [{i['meta'].get('type', 'item')}] {i['body'].splitlines()[0] if i['body'] else ''}"
+            f" (due {i['meta'].get('due', '-')})"
+            for i in active
+        ]
+        sections.append("## temporal (active)\n\n" + "\n".join(lines))
+
     if not sections:
         return "The wiki is empty."
     return "\n\n---\n\n".join(sections)

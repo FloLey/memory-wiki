@@ -82,8 +82,14 @@ def write_stm_entry(
     content: str,
     summary: str = "",
     tags: list[str] | None = None,
+    due: str | None = None,
+    kind: str | None = None,
 ) -> tuple[int, str]:
-    """Write a new short-term entry and update the index. Returns (id, created)."""
+    """Write a new short-term entry and update the index. Returns (id, created).
+
+    ``due`` (a date the daemon can use to file the item as temporal) and ``kind``
+    (todo / reminder / event / souvenir) are optional hints stored in the entry
+    frontmatter; the daemon decides what to do with them."""
     clean_tags = _clean_tags(tags)
     tag_list = ", ".join(clean_tags)
     body = content.strip()
@@ -95,11 +101,13 @@ def write_stm_entry(
         entries_dir = resolve_under_root(STM_ENTRIES_DIR)
         entries_dir.mkdir(parents=True, exist_ok=True)
 
+        fm = [f"id: {entry_id}", f"created: {created}", f"tags: [{tag_list}]"]
+        if due and fm_value(due):
+            fm.append(f"due: {fm_value(due)}")
+        if kind and fm_value(kind):
+            fm.append(f"type: {fm_value(kind)}")
         entry_path = resolve_under_root(f"{STM_ENTRIES_DIR}/{entry_id}.md")
-        entry_path.write_text(
-            f"---\nid: {entry_id}\ncreated: {created}\ntags: [{tag_list}]\n---\n\n{body}\n",
-            encoding="utf-8",
-        )
+        entry_path.write_text("---\n" + "\n".join(fm) + f"\n---\n\n{body}\n", encoding="utf-8")
 
         if not summary.strip():
             lines = body.splitlines()
@@ -116,6 +124,67 @@ def write_stm_entry(
 
         git_commit(f"stm: remember entry {entry_id}")
         return entry_id, created
+
+
+def fm_value(value: str) -> str:
+    """Sanitize a value going into single-line frontmatter: no newlines (which
+    would inject extra frontmatter keys)."""
+    return (value or "").replace("\r", " ").replace("\n", " ").strip()
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Parse simple ``key: value`` YAML-ish frontmatter. Returns (meta, body)."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    meta: dict = {}
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            for line in text[3:end].strip().splitlines():
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    meta[key.strip()] = value.strip()
+            return meta, text[end + 4:].lstrip("\n")
+    return meta, text
+
+
+def _stm_row(path) -> str:
+    meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+    entry_id = meta.get("id", path.stem)
+    created = meta.get("created", "")
+    tags = meta.get("tags", "").strip().strip("[]").strip()
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    summary = (lines[0] if lines else "").replace("|", "/")[:100]
+    return f"| {entry_id} | {created} | {summary} | {tags} |"
+
+
+def stm_index_content(exclude_ids: set[str] | None = None) -> str:
+    """Rebuild the STM index content from the entry files, optionally excluding
+    some ids (used by the dream to drop consumed entries)."""
+    exclude = {str(i) for i in (exclude_ids or set())}
+    entries_dir = resolve_under_root(STM_ENTRIES_DIR)
+    rows = []
+    if entries_dir.is_dir():
+        for p in sorted(entries_dir.glob("*.md"), key=lambda x: int(x.stem) if x.stem.isdigit() else 0):
+            if p.stem in exclude:
+                continue
+            rows.append(_stm_row(p))
+    return STM_INDEX_HEADER + ("\n".join(rows) + "\n" if rows else "")
+
+
+def apply_changes(writes: dict[str, str], deletes: list[str], message: str) -> None:
+    """Apply a batch of file writes and deletes in a single commit, under the
+    lock. Used by the dream execution so a whole run is one commit. Deletions are
+    soft (files leave the tree but stay in git history)."""
+    with _write_lock:
+        for rel, content in writes.items():
+            path = resolve_under_root(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        for rel in deletes:
+            path = resolve_under_root(rel)
+            if path.is_file():
+                path.unlink()
+        git_commit(message)
 
 
 def write_file(rel: str, content: str, message: str):

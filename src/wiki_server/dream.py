@@ -16,8 +16,14 @@ import json
 import os
 import threading
 
-from wiki_server.paths import resolve_under_root
-from wiki_server.store import write_file, write_files
+from wiki_server import temporal
+from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
+from wiki_server.store import (
+    apply_changes,
+    stm_index_content,
+    write_file,
+    write_files,
+)
 
 # Serializes a whole dream run, so concurrent triggers cannot double-call the API
 # or lose-update the usage ledger (read-append-write).
@@ -62,6 +68,9 @@ sujet, personne, projet, idée), pas par tags.
   la bonne catégorie.
 - Garder : si ce n'est pas assez clair ou mûr, laisse l'entrée en court terme
   pour une prochaine nuit.
+- Temporal : si une entrée est datée ou actionnable (tâche, rappel, événement
+  borné, souvenir temporaire), range-la dans temporal/ plutôt qu'en long terme.
+  Elle vit jusqu'à sa date, puis est archivée automatiquement.
 
 Tu ne jettes jamais. Tu ne supprimes rien. Dans le doute, garde.
 
@@ -148,10 +157,11 @@ Voici les entrées de la mémoire court terme à consolider :
 Nous sommes en DRY-RUN : tu ne fais que PROPOSER, tu ne modifies rien.
 
 Produis ton plan de consolidation sous forme de rapport markdown clair. Pour
-chaque groupe d'entrées liées : l'action choisie (integrer / promouvoir / garder),
-la page cible (chemin), la justification en une ligne, et, le cas échéant, le
-contenu rédigé proposé pour la page. Termine par les éventuelles réorganisations,
-liens à créer, et mises à jour de l'index que tu proposerais."""
+chaque groupe d'entrées liées : l'action choisie (integrer / promouvoir / garder
+/ temporal), la page ou la destination cible (chemin), la justification en une
+ligne, et, le cas échéant, le contenu rédigé proposé. Pour une action temporal,
+précise le type (todo / reminder / event / souvenir) et la date. Termine par les
+éventuelles réorganisations, liens à créer, et mises à jour de l'index."""
 
 
 def _ask_model(prompt: str) -> tuple[str, int, int]:
@@ -190,6 +200,17 @@ def _prices_for(model: str) -> tuple[float, float]:
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     price_in, price_out = _prices_for(model)
     return input_tokens / 1_000_000 * price_in + output_tokens / 1_000_000 * price_out
+
+
+def _usage_entry(when: datetime.datetime, in_tok: int, out_tok: int) -> dict:
+    model = os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL
+    return {
+        "timestamp": when.replace(microsecond=0).isoformat(),
+        "model": model,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cost": round(_estimate_cost(model, in_tok, out_tok), 6),
+    }
 
 
 def read_usage() -> list[dict]:
@@ -235,14 +256,7 @@ def run_dry_run() -> tuple[str, str]:
             ltm_index = _read("long_term/index.md")
             body, in_tok, out_tok = _ask_model(_build_prompt(policy, stm_entries, ltm_index))
             if in_tok or out_tok:
-                model = os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL
-                usage_entry = {
-                    "timestamp": date.replace(microsecond=0).isoformat(),
-                    "model": model,
-                    "input_tokens": in_tok,
-                    "output_tokens": out_tok,
-                    "cost": round(_estimate_cost(model, in_tok, out_tok), 6),
-                }
+                usage_entry = _usage_entry(date, in_tok, out_tok)
 
         report = f"# Dream dry-run, {day}\n\n{body}\n"
         rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
@@ -251,6 +265,212 @@ def run_dry_run() -> tuple[str, str]:
             files[USAGE_FILE] = json.dumps(read_usage() + [usage_entry], indent=2)
         write_files(files, f"dream: dry-run report {day}")
         return rel, report
+
+
+def _read_all_ltm_pages() -> list[tuple[str, str]]:
+    """(path, content) for every long-term page (excluding private)."""
+    root = wiki_root()
+    ltm = root / "long_term"
+    out = []
+    if ltm.is_dir():
+        for p in sorted(ltm.rglob("*.md")):
+            if "private" in p.relative_to(root).parts:
+                continue
+            try:
+                out.append((p.relative_to(root).as_posix(), p.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError):
+                continue
+    return out
+
+
+def _build_execute_prompt(policy, stm_entries, ltm_pages, active_temporal) -> str:
+    entries_block = "\n\n".join(f"### short_term/entries/{name}\n{body}" for name, body in stm_entries)
+    pages_block = "\n\n".join(f"### {path}\n{content}" for path, content in ltm_pages) or "(aucune page)"
+    temporal_block = "\n".join(
+        f"- {i['path']} ({i['meta'].get('type','?')}, due {i['meta'].get('due','-')}): {i['body'][:80]}"
+        for i in active_temporal
+    ) or "(aucun)"
+    return f"""Voici ta politique de consolidation (DREAM.md). Suis-la strictement.
+
+<policy>
+{policy}
+</policy>
+
+Pages long terme existantes (chemin puis contenu complet) :
+
+<long_term_pages>
+{pages_block}
+</long_term_pages>
+
+Items temporal actifs (déjà programmés, ne les recrée pas) :
+
+<temporal_active>
+{temporal_block}
+</temporal_active>
+
+Entrées de la mémoire court terme à consolider :
+
+<short_term_entries>
+{entries_block}
+</short_term_entries>
+
+Applique la politique et renvoie UNIQUEMENT un objet JSON (sans texte autour, sans
+bloc de code) avec ce schéma :
+
+{{
+  "pages": [{{"path": "long_term/<categorie>/<nom>.md", "content": "<markdown COMPLET final de la page, liens markdown inclus>"}}],
+  "index": "<contenu COMPLET final de long_term/index.md, à jour>",
+  "temporal": [{{"type": "todo|reminder|event|souvenir", "due": "YYYY-MM-DD ou null", "content": "<texte>"}}],
+  "consumed_stm": [<id des entrées court terme que tu as classées (en page ou en temporal)>],
+  "summary": "<résumé en une phrase>"
+}}
+
+Règles :
+- Pour "integrer", donne le contenu COMPLET fusionné de la page existante (pas un diff).
+- Pour "promouvoir", crée une nouvelle page sous une des cinq catégories.
+- Les chemins de "pages" commencent par long_term/ et finissent par .md.
+- "temporal" : les entrées datées ou actionnables vont là, pas en long terme.
+- "consumed_stm" : seulement les entrées que tu as effectivement classées. Celles
+  que tu gardes (pas assez mûres) : ne les liste pas, elles restent en court terme.
+- Tu ne supprimes rien d'autre.
+"""
+
+
+def _parse_plan(text: str) -> dict | None:
+    """Extract the JSON plan from the model output. Returns None if unparseable.
+    Tries fenced ```json blocks first, then a first-brace..last-brace fallback."""
+    cleaned = text.strip()
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        for i in range(1, len(parts), 2):
+            block = parts[i].strip()
+            if block.lower().startswith("json"):
+                block = block[4:].strip()
+            if block.startswith("{") and block.endswith("}"):
+                try:
+                    plan = json.loads(block)
+                    if isinstance(plan, dict):
+                        return plan
+                except ValueError:
+                    pass
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        plan = json.loads(cleaned[start:end + 1])
+        return plan if isinstance(plan, dict) else None
+    except ValueError:
+        return None
+
+
+def run_execute() -> tuple[str, str]:
+    """Run a real consolidation: apply the model's plan (pages, temporal, index),
+    drop consumed short-term entries, expire past-due temporal items, all in one
+    commit. Never deletes long-term content. Returns (report_path, report_text)."""
+    with _dream_lock:
+        policy = ensure_policy()
+        stm_entries = _read_stm_entries()
+        when = datetime.datetime.now(datetime.timezone.utc)
+        day = when.date().isoformat()
+
+        writes: dict[str, str] = {}
+        deletes: list[str] = []
+        usage_entry = None
+        notes: list[str] = []
+
+        # Expire past-due temporal items regardless of STM.
+        expirations = temporal.expire_changes(day)
+        writes.update(expirations)
+        if expirations:
+            notes.append(f"Expired {len(expirations)} temporal item(s).")
+
+        if not stm_entries:
+            notes.append("Short-term memory is empty; nothing to consolidate.")
+        else:
+            ltm_pages = _read_all_ltm_pages()
+            active_temporal = temporal.list_items(active_only=True)
+            text, in_tok, out_tok = _ask_model(
+                _build_execute_prompt(policy, stm_entries, ltm_pages, active_temporal)
+            )
+            if in_tok or out_tok:
+                usage_entry = _usage_entry(when, in_tok, out_tok)
+            plan = _parse_plan(text)
+            if plan is None:
+                notes.append("Could not parse a plan from the model; no changes applied.")
+                notes.append(text[:500])
+            else:
+                _apply_plan(plan, writes, deletes, notes)
+
+        report = f"# Dream, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+        rel = f"{DREAM_REPORTS_DIR}/{day}.md"
+        writes[rel] = report
+        if usage_entry is not None:
+            writes[USAGE_FILE] = json.dumps(read_usage() + [usage_entry], indent=2)
+        apply_changes(writes, deletes, f"dream: {day} consolidation")
+        return rel, report
+
+
+def _apply_plan(plan: dict, writes: dict, deletes: list, notes: list) -> None:
+    """Translate a validated plan into writes/deletes. Skips anything unsafe."""
+    # Pages (integrate + promote): full content, paths under long_term/.
+    pages = plan.get("pages")
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            path = str(page.get("path", "")).strip()
+            content = page.get("content", "")
+            if not path.startswith("long_term/") or not path.endswith(".md") or not isinstance(content, str):
+                notes.append(f"Skipped invalid page path: {path!r}")
+                continue
+            try:
+                resolve_under_root(path)
+            except WikiPathError:
+                notes.append(f"Skipped forbidden page path: {path!r}")
+                continue
+            writes[path] = content
+            notes.append(f"Wrote page {path}")
+
+    # Index.
+    index = plan.get("index")
+    if isinstance(index, str) and index.strip():
+        writes["long_term/index.md"] = index
+        notes.append("Updated long_term/index.md")
+
+    # Temporal items.
+    next_id = temporal.next_temporal_id()
+    temporal_items = plan.get("temporal")
+    if isinstance(temporal_items, list):
+        for item in temporal_items:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "todo"))
+            due = item.get("due")
+            due = due.strip() if isinstance(due, str) and due.strip().lower() not in ("", "null", "none") else None
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            rel, file_content = temporal.build_item(next_id, kind, due, content)
+            writes[rel] = file_content
+            notes.append(f"Created temporal {rel}")
+            next_id += 1
+
+    # Consumed short-term entries: delete files and rebuild the STM index. Guard
+    # the type: a stray string like "12" would otherwise iterate into chars and
+    # delete the wrong entries.
+    consumed_raw = plan.get("consumed_stm")
+    consumed = {str(i) for i in consumed_raw if i is not None} if isinstance(consumed_raw, list) else set()
+    if consumed:
+        for cid in consumed:
+            entry_rel = f"short_term/entries/{cid}.md"
+            if resolve_under_root(entry_rel).is_file():
+                deletes.append(entry_rel)
+        writes["short_term/index.md"] = stm_index_content(exclude_ids=consumed)
+        notes.append(f"Consumed short-term entries: {', '.join(sorted(consumed))}")
+
+    summary = plan.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        notes.append(f"Summary: {summary.strip()}")
 
 
 def list_reports() -> list[str]:
