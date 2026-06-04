@@ -208,6 +208,7 @@ def _page(title: str, body: str, *, login: str | None = None, crumb: str = "") -
         nav = (
             '<nav><a href="/ui">Overview</a>'
             '<a href="/ui/dream">Dreams</a>'
+            '<a href="/ui/prompts">Prompts</a>'
             '<a href="/ui/edit">New page</a>'
             '<a href="/ui/logout">Logout</a></nav>'
         )
@@ -563,3 +564,41 @@ def register_ui(
 
         rel, _ = await run_in_threadpool(run_execute)
         return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
+
+    # ---- prompts (editable policy + stage prompts) ----
+    @mcp.custom_route("/ui/prompts", methods=["GET"])
+    async def ui_prompts(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return RedirectResponse("/ui/login")
+        from wiki_server.dream import DREAM_POLICY, ensure_policy
+        from wiki_server.prompts import PROMPT_FILES, ensure_prompt
+
+        # Seed defaults if absent, so they are always viewable/editable.
+        ensure_policy()
+        for stage in PROMPT_FILES:
+            ensure_prompt(stage)
+
+        rows = []
+        items = [("DREAM.md", DREAM_POLICY, "Politique editoriale: quoi faire.")]
+        items += [
+            (f"prompts/{stage}", PROMPT_FILES[stage], desc)
+            for stage, desc in (
+                ("triage", "Etape 1: regrouper et router."),
+                ("decide", "Etape 2: decider l'action par unite."),
+                ("write", "Etape 3: rediger le contenu d'une page."),
+            )
+        ]
+        for label, rel, desc in items:
+            rows.append(
+                f'<li><a class="name" href="/ui/page/{quote(rel)}">{html.escape(label)}</a>'
+                f'<a class="edit" href="/ui/edit?path={quote(rel)}">edit</a>'
+                f'<div class="muted">{html.escape(desc)}</div></li>'
+            )
+        body = (
+            "<p class='muted'>La politique et les trois prompts du daemon sont editables. "
+            "Le schema de sortie JSON est ajoute par le code, donc editer les consignes ne "
+            "casse jamais le contrat machine.</p>"
+            f"<section class='card'><ul class='filelist'>{''.join(rows)}</ul></section>"
+        )
+        return _page("Prompts", body, login=login)
