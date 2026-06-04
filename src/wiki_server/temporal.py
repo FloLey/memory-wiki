@@ -36,17 +36,22 @@ def item_stem(content: str, due: str | None, created: str | None, taken: set[str
     return unique_stem(TEMPORAL_DIR, f"{prefix}-{slugify(content)}", taken)
 
 
+def _render_item(kind: str, created: str | None, status: str, due: str | None, body: str) -> str:
+    """Render a temporal item's file content (frontmatter + body). Shared by
+    build_item (new items) and expire_changes (flipping status)."""
+    kind = kind if kind in KINDS else "todo"
+    fm = [f"type: {kind}", f"created: {fm_value(created or '')}", f"status: {status}"]
+    if due and fm_value(due):
+        fm.append(f"due: {fm_value(due)}")
+    return "---\n" + "\n".join(fm) + f"\n---\n\n{body.strip()}\n"
+
+
 def build_item(stem: str, kind: str, due: str | None, content: str,
                created: str | None = None, status: str = "active") -> tuple[str, str]:
     """Build (relative_path, file_content) for a temporal item. Pure, so the
     dream can batch several into one commit."""
-    created = fm_value(created or datetime.date.today().isoformat())
-    kind = kind if kind in KINDS else "todo"
-    fm = [f"type: {kind}", f"created: {created}", f"status: {status}"]
-    if due and fm_value(due):
-        fm.append(f"due: {fm_value(due)}")
-    body = content.strip()
-    return f"{TEMPORAL_DIR}/{stem}.md", "---\n" + "\n".join(fm) + f"\n---\n\n{body}\n"
+    created = created or datetime.date.today().isoformat()
+    return f"{TEMPORAL_DIR}/{stem}.md", _render_item(kind, created, status, due, content)
 
 
 def list_items(active_only: bool = False) -> list[dict]:
@@ -83,21 +88,6 @@ def expire_changes(today: str | None = None) -> dict[str, str]:
         except ValueError:
             continue
         if due < today:
-            fm = [
-                f"type: {meta.get('type', 'todo')}",
-                f"created: {meta.get('created', '')}",
-                "status: expired",
-                f"due: {due}",
-            ]
-            changes[item["path"]] = "---\n" + "\n".join(fm) + f"\n---\n\n{body}\n"
+            changes[item["path"]] = _render_item(
+                meta.get("type", "todo"), meta.get("created", ""), "expired", due, body)
     return changes
-
-
-def create_item(kind: str, due: str | None, content: str) -> str:
-    """Create one temporal item directly (UI path), committing immediately."""
-    from wiki_server.store import write_file
-
-    stem = item_stem(content, due, None)
-    rel, file_content = build_item(stem, kind, due, content)
-    write_file(rel, file_content, f"manual: add temporal {stem}")
-    return rel

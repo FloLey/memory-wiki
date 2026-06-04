@@ -1,7 +1,9 @@
 """Personal Memory Wiki MCP server.
 
-Read tools so far: a trivial connectivity check (``ping``) and the long-term
-index reader (``read_long_term_index``).
+Tools for Claude: ``prime`` (load the grounding context), ``read`` (read any
+file), ``search`` (full-text), and ``remember`` (capture to short-term memory).
+A public ``/health`` route serves the container healthcheck, and the web console
+is mounted from ``ui``.
 
 Authentication (slice 2): when configured, the server is protected by GitHub
 OAuth via FastMCP's ``GitHubProvider`` (an OAuth proxy that lets Claude.ai run
@@ -135,7 +137,7 @@ def prime() -> str:
 def read(path: str) -> str:
     """Read any file in the memory by its path: a page, an index, or a short-term
     entry. Examples: ``long_term/index.md``, ``long_term/self/identity.md``,
-    ``short_term/index.md``, ``short_term/entries/1.md``.
+    ``short_term/index.md``, ``short_term/entries/2026-06-15-rdv-dentiste.md``.
 
     Tolerant of paths: a bare path like ``self/identity.md`` (as written in index
     links) is accepted. If nothing is found it returns suggestions, never a bare

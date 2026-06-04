@@ -277,6 +277,18 @@ def register_ui(
         payload = _verify(secret_key, token)
         return bool(payload and payload.get("k") == "csrf" and payload.get("login") == login)
 
+    async def require_post(request: Request):
+        """Gate a POST handler: returns (login, form, None) when authenticated with
+        a valid CSRF token, or (None, None, error_response) to return immediately."""
+        login = current_login(request)
+        if not login:
+            return None, None, PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        csrf_val = form.get("csrf")
+        if not isinstance(csrf_val, str) or not csrf_ok(login, csrf_val):
+            return None, None, PlainTextResponse("Bad CSRF token.", status_code=403)
+        return login, form, None
+
     # ---- login flow ----
     @mcp.custom_route("/ui/login", methods=["GET"])
     async def ui_login(request: Request) -> Response:
@@ -475,12 +487,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/save", methods=["POST"])
     async def ui_save(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         rel = (form.get("path") or "").strip()
         content = form.get("content") or ""
         if not rel.endswith(".md"):
@@ -493,12 +502,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/delete", methods=["POST"])
     async def ui_delete(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         rel = (form.get("path") or "").strip()
         try:
             delete_file(rel, f"manual: delete {rel}")
@@ -569,12 +575,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/dream/run", methods=["POST"])
     async def ui_dream_run(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         from starlette.concurrency import run_in_threadpool
         from wiki_server.dream import run_dry_run
 
@@ -583,12 +586,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/dream/execute", methods=["POST"])
     async def ui_dream_execute(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         from starlette.concurrency import run_in_threadpool
         from wiki_server.dream import run_execute
 
@@ -597,12 +597,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/dream/reset-cost", methods=["POST"])
     async def ui_dream_reset_cost(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         from wiki_server.dream import reset_usage
 
         reset_usage()
@@ -707,12 +704,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/prompts/migrate-entities", methods=["POST"])
     async def ui_prompts_migrate(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         from starlette.concurrency import run_in_threadpool
         from wiki_server.dream import migrate_entities
 
@@ -721,12 +715,9 @@ def register_ui(
 
     @mcp.custom_route("/ui/prompts/models", methods=["POST"])
     async def ui_prompts_models(request: Request) -> Response:
-        login = current_login(request)
-        if not login:
-            return PlainTextResponse("Unauthorized.", status_code=401)
-        form = await request.form()
-        if not csrf_ok(login, form.get("csrf")):
-            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        login, form, err = await require_post(request)
+        if err:
+            return err
         from wiki_server.dream import STAGES, set_models
 
         set_models({s: form.get(s) for s in STAGES})

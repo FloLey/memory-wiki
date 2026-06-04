@@ -444,61 +444,70 @@ def _classify_entities(usage: _Usage, items: list[tuple[str, str]]) -> dict[str,
             if isinstance(k, str) and isinstance(v, str) and v in _MIGRATION_CATEGORIES}
 
 
-def migrate_entities() -> tuple[str, str]:
-    """Move every page under long_term/entities/ into people/places/organizations,
-    rewrite all links, and regenerate the index, in one revertible commit."""
+def _guarded(dry: bool, work) -> tuple[str, str]:
+    """Run a dream entry point under the lock. Never raises: returns a report if
+    the API key is missing or the work fails, so the UI never gets a raw 500."""
     with _dream_lock:
         when = datetime.datetime.now(datetime.timezone.utc)
         day = when.date().isoformat()
-        rel_report = f"{DREAM_REPORTS_DIR}/{day}-migration.md"
-        ent = resolve_under_root("long_term/entities")
-        files = sorted(ent.glob("*.md")) if ent.is_dir() else []
-        if not files:
-            report = f"# Migration entities, {day}\n\nAucune page entities à migrer.\n"
-            write_files({rel_report: report}, f"manual: migration report {day}")
-            return rel_report, report
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return _no_key_report(day, dry=False)
         try:
-            usage = _Usage()
-            root = wiki_root()
-            items = [(p.stem, _first_line(p.relative_to(root).as_posix())) for p in files]
-            mapping = _classify_entities(usage, items)
-
-            moves: dict[str, str] = {}
-            for p in files:
-                stem = p.stem
-                cat = mapping.get(stem, "people")  # default to people if unsure
-                moves[f"long_term/entities/{stem}.md"] = f"long_term/{cat}/{stem}.md"
-
-            writes: dict[str, str] = {}
-            deletes: list[str] = []
-            final_paths: set[str] = set()
-            for p in (root / "long_term").rglob("*.md"):
-                rel = p.relative_to(root).as_posix()
-                if rel == "long_term/index.md" or "private" in p.relative_to(root).parts:
-                    continue
-                new_rel = moves.get(rel, rel)
-                writes[new_rel] = _rewrite_links(_read(rel), moves)
-                final_paths.add(new_rel)
-                if new_rel != rel:
-                    deletes.append(rel)
-
-            descs = {moves.get(k, k): v for k, v in _index_descriptions().items()}
-            writes["long_term/index.md"] = _render_index(final_paths, descs)
-
-            notes = [f"{old} -> {new}" for old, new in sorted(moves.items())]
-            report = (f"# Migration entities, {day}\n\n"
-                      + "\n".join(f"- {n}" for n in notes) + "\n")
-            writes[rel_report] = report
-            entry = usage.entry(when)
-            if entry:
-                writes[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
-            apply_changes(writes, deletes,
-                          "manual: migrate entities into people/places/organizations")
-            return rel_report, report
+            if not os.environ.get("ANTHROPIC_API_KEY"):
+                return _no_key_report(day, dry)
+            return work(when, day)
         except Exception:
-            return _error_report(day, dry=False)
+            return _error_report(day, dry)
+
+
+def migrate_entities() -> tuple[str, str]:
+    """Move every page under long_term/entities/ into people/places/organizations,
+    rewrite all links, and regenerate the index, in one revertible commit."""
+    return _guarded(False, _migrate)
+
+
+def _migrate(when: datetime.datetime, day: str) -> tuple[str, str]:
+    rel_report = f"{DREAM_REPORTS_DIR}/{day}-migration.md"
+    ent = resolve_under_root("long_term/entities")
+    files = sorted(ent.glob("*.md")) if ent.is_dir() else []
+    if not files:
+        report = f"# Migration entities, {day}\n\nAucune page entities à migrer.\n"
+        write_files({rel_report: report}, f"manual: migration report {day}")
+        return rel_report, report
+
+    usage = _Usage()
+    root = wiki_root()
+    items = [(p.stem, _first_line(p.relative_to(root).as_posix())) for p in files]
+    mapping = _classify_entities(usage, items)
+
+    moves: dict[str, str] = {}
+    for p in files:
+        cat = mapping.get(p.stem, "people")  # default to people if unsure
+        moves[f"long_term/entities/{p.stem}.md"] = f"long_term/{cat}/{p.stem}.md"
+
+    writes: dict[str, str] = {}
+    deletes: list[str] = []
+    final_paths: set[str] = set()
+    for p in (root / "long_term").rglob("*.md"):
+        rel = p.relative_to(root).as_posix()
+        if rel == "long_term/index.md" or "private" in p.relative_to(root).parts:
+            continue
+        new_rel = moves.get(rel, rel)
+        writes[new_rel] = _rewrite_links(_read(rel), moves)
+        final_paths.add(new_rel)
+        if new_rel != rel:
+            deletes.append(rel)
+
+    descs = {moves.get(k, k): v for k, v in _index_descriptions().items()}
+    writes["long_term/index.md"] = _render_index(final_paths, descs)
+
+    notes = [f"{old} -> {new}" for old, new in sorted(moves.items())]
+    report = f"# Migration entities, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    writes[rel_report] = report
+    entry = usage.entry(when)
+    if entry:
+        writes[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
+    apply_changes(writes, deletes,
+                  "manual: migrate entities into people/places/organizations")
+    return rel_report, report
 
 
 def usage_summary() -> dict:
@@ -588,46 +597,34 @@ def _format_decisions(pairs: list[dict]) -> str:
 
 def run_dry_run() -> tuple[str, str]:
     """Triage + decide, reported for review. Changes no memory."""
-    with _dream_lock:
-        when = datetime.datetime.now(datetime.timezone.utc)
-        day = when.date().isoformat()
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return _no_key_report(day, dry=True)
-        try:
-            policy = ensure_policy()
-            stm_entries = _read_stm_entries()
-            usage = _Usage()
-            notes: list[str] = []
-            if not stm_entries:
-                body = "Mémoire court terme vide. Rien à consolider."
-            else:
-                body = _format_decisions(_decisions(usage, policy, stm_entries, notes))
-            if notes:
-                body += "\n\n---\n\n" + "\n".join(f"- {n}" for n in notes)
+    return _guarded(True, _dry_run)
 
-            report = f"# Dream dry-run, {day}\n\n{body}\n"
-            rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
-            files = {rel: report}
-            entry = usage.entry(when)
-            if entry:
-                files[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
-            write_files(files, f"dream: dry-run report {day}")
-            return rel, report
-        except Exception:
-            return _error_report(day, dry=True)
+
+def _dry_run(when: datetime.datetime, day: str) -> tuple[str, str]:
+    policy = ensure_policy()
+    stm_entries = _read_stm_entries()
+    usage = _Usage()
+    notes: list[str] = []
+    if not stm_entries:
+        body = "Mémoire court terme vide. Rien à consolider."
+    else:
+        body = _format_decisions(_decisions(usage, policy, stm_entries, notes))
+    if notes:
+        body += "\n\n---\n\n" + "\n".join(f"- {n}" for n in notes)
+
+    report = f"# Dream dry-run, {day}\n\n{body}\n"
+    rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
+    files = {rel: report}
+    entry = usage.entry(when)
+    if entry:
+        files[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
+    write_files(files, f"dream: dry-run report {day}")
+    return rel, report
 
 
 def run_execute() -> tuple[str, str]:
     """Triage + decide + write, applied in one revertible commit."""
-    with _dream_lock:
-        when = datetime.datetime.now(datetime.timezone.utc)
-        day = when.date().isoformat()
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return _no_key_report(day, dry=False)
-        try:
-            return _execute(when, day)
-        except Exception:
-            return _error_report(day, dry=False)
+    return _guarded(False, _execute)
 
 
 def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:

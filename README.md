@@ -154,6 +154,20 @@ Then set the repository Actions secrets `GH_OAUTH_CLIENT_ID`,
 - **Public URL:** `https://wiki.florent-lejoly.be/mcp`, fronted by Caddy
   (auto-HTTPS) in the main `docker-compose.yml`.
 
+## Tests
+
+The logic (storage, temporal items, the dream pipeline, path guard, prime) is
+covered by a fast pytest suite that runs against a throwaway wiki, with git
+commits stubbed. From `memory-wiki/`:
+
+```sh
+pip install pytest        # or: pip install -e ".[dev]"
+pytest -q
+```
+
+The suite also runs in CI on every push. The tests need no API key or network:
+the model-calling steps are stubbed.
+
 ## Run locally
 
 From the repo root:

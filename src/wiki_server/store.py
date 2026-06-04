@@ -53,15 +53,6 @@ def _clean_tags(tags: list[str] | None) -> list[str]:
     return [t for t in cleaned if t]
 
 
-def next_stm_id() -> int:
-    """Next free short-term id: one past the highest numeric entry file."""
-    entries = resolve_under_root(STM_ENTRIES_DIR)
-    if not entries.is_dir():
-        return 1
-    ids = [int(p.stem) for p in entries.glob("*.md") if p.stem.isdigit()]
-    return (max(ids) + 1) if ids else 1
-
-
 def slugify(text: str, maxlen: int = 60) -> str:
     """A readable, ascii, hyphenated slug for a filename. Empty -> 'note'."""
     text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
@@ -211,26 +202,16 @@ def apply_changes(writes: dict[str, str], deletes: list[str], message: str) -> N
 
 
 def write_file(rel: str, content: str, message: str):
-    """Write/overwrite a file under the wiki root and commit. Used by the web
-    console for manual edits (commit prefix ``manual:``). Lock-protected so it
-    cannot interleave with a remember() write or another edit."""
-    with _write_lock:
-        path = resolve_under_root(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        git_commit(message)
-        return path
+    """Write/overwrite one file under the wiki root and commit, returning its
+    path. Used by the web console for manual edits (commit prefix ``manual:``)."""
+    apply_changes({rel: content}, [], message)
+    return resolve_under_root(rel)
 
 
 def write_files(files: dict[str, str], message: str) -> None:
-    """Write several files and record them in a single commit. Lock-protected.
-    Used by the dream so a run is one commit (report + usage ledger)."""
-    with _write_lock:
-        for rel, content in files.items():
-            path = resolve_under_root(rel)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-        git_commit(message)
+    """Write several files and record them in a single commit. Used by the dream
+    so a run is one commit (report + usage ledger)."""
+    apply_changes(files, [], message)
 
 
 def delete_file(rel: str, message: str) -> bool:
