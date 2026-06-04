@@ -29,9 +29,11 @@ lieu, sujet ou idée), pas par tags ni par date d'écriture. Pour chaque groupe,
 indique :
 - les fichiers court terme concernés,
 - une intention courte et neutre,
-- les pages long terme existantes qu'il touche (chemins tirés de l'index ; une
-  liste, car un même groupe peut concerner plusieurs pages ; vide si le sujet
-  est nouveau),
+- les pages long terme qu'il touche, comme une liste de chemins canoniques : pour
+  un sujet déjà au catalogue, reprends son chemin tel quel ; pour un sujet
+  nouveau, propose un chemin déterministe en minuscules-à-tirets
+  (catégorie/slug). Un même sujet doit recevoir EXACTEMENT le même chemin dans
+  toutes les unités qui le touchent, pour qu'une seule page existe au final,
 - un indice d'action dominant : integrate (une page existante à enrichir),
   promote (un sujet durable sans page encore), temporal (une chose datée ou
   actionnable), keep (pas assez mûr, à laisser en court terme).
@@ -50,7 +52,10 @@ touche.
 Une entrée peut concerner plusieurs sujets : liste une opération par page long
 terme touchée (integrate pour une page existante, promote pour une nouvelle), et
 un item par chose datée. Une entrée qui mentionne plusieurs personnes, projets ou
-sujets touche donc une page par sujet, pas une seule. Si rien n'est assez mûr,
+sujets touche donc une page par sujet, pas une seule. Reprends les chemins exacts
+fournis dans touched_pages comme chemins canoniques, sans inventer de variante :
+integrate si la page a déjà du contenu, promote si elle est vide (nouvelle). Si
+rien n'est assez mûr,
 laisse l'entrée en court terme (listes vides). Pour les items temporels : type
 (todo/reminder/event/souvenir) et
 "due" = la date jusqu'à laquelle l'item reste actif (date de fin pour un séjour
@@ -85,7 +90,10 @@ SCHEMAS = {
     "triage": (
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'
         '{"units": [{"stm": ["<nom de fichier court terme>"], "intent": "<courte description>", '
-        '"touches": ["long_term/<chemin>.md"], "hint": "integrate|promote|temporal|keep"}]}'
+        '"touches": ["long_term/<chemin>.md"], "hint": "integrate|promote|temporal|keep"}]}\n'
+        '"touches" liste les chemins canoniques des pages touchées, existants ou '
+        'proposés pour un sujet nouveau ; un même sujet reçoit le même chemin dans '
+        'toutes les unités.'
     ),
     "decide": (
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'

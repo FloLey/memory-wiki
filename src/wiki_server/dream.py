@@ -56,7 +56,11 @@ jettes jamais, tu ne supprimes rien. Dans le doute, garde.
 ## Les cinq catégories (fixes)
 Tu ne crées jamais de nouvelle catégorie de haut niveau ; tu ranges dans l'une
 de ces cinq.
-- self : Florent lui-même.
+- self : Florent lui-même. Une seule page, self/identity.md, regroupe tous les
+  faits durables sur lui (naissance, métier, etc.) ; tu intègres ces faits dans
+  cette page unique et n'éclates jamais ses attributs en plusieurs pages self.
+  Les organisations, lieux ou personnes liés gardent leur propre page entities,
+  reliée par un lien.
 - entities : personnes, lieux, organisations, objets.
 - projects : ses projets.
 - concepts : idées, sujets, savoirs.
@@ -234,7 +238,9 @@ def _decisions(usage: _Usage, policy: str, stm_entries: list[tuple[str, str]], n
             f"### {n}\n{stm_map.get(n) or stm_map.get(n + '.md') or ''}" for n in names
         )
         touches = [t for t in (unit.get("touches") or []) if isinstance(t, str) and t.startswith("long_term/")]
-        pages_block = "\n\n".join(f"### {t}\n{_read(t)}" for t in touches) or "(aucune page touchée)"
+        pages_block = "\n\n".join(
+            f"### {t}\n{_read(t) or '(nouvelle page, vide)'}" for t in touches
+        ) or "(aucune page touchée)"
         decision = _stage(usage, "decide",
                           f"<policy>\n{policy}\n</policy>\n\n"
                           f"<unit intent=\"{unit.get('intent', '')}\">\n{unit_stm}\n</unit>\n\n"
@@ -246,10 +252,13 @@ def _decisions(usage: _Usage, policy: str, stm_entries: list[tuple[str, str]], n
     return pairs
 
 
-def _write_page(usage: _Usage, policy: str, op: dict) -> dict | None:
-    """Stage 3: produce {content, description} for one integrate/promote page op."""
+def _write_page(usage: _Usage, policy: str, op: dict, current: str = "") -> dict | None:
+    """Stage 3: produce {content, description} for one integrate/promote page op.
+
+    ``current`` is the page's content as it stands *at this point in the dream*:
+    the caller passes what an earlier unit already produced for this path, so a
+    page touched by several units is built cumulatively instead of overwritten."""
     page = op.get("page", "")
-    current = _read(page)
     out = _stage(usage, "write",
                  f"<policy>\n{policy}\n</policy>\n\n"
                  f"<operation>\n{json.dumps(op, ensure_ascii=False)}\n</operation>\n\n"
@@ -377,7 +386,22 @@ def _format_decisions(pairs: list[dict]) -> str:
         if d.get("rationale"):
             lines.append(f"- pourquoi : {d['rationale']}")
         blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+
+    # Pages touched by more than one unit are built cumulatively at execute time
+    # (one merged page), not duplicated. Flag them so the dry-run reflects reality.
+    counts: dict[str, int] = {}
+    for pair in pairs:
+        for op in _as_list(pair["decision"].get("pages")):
+            if isinstance(op, dict) and isinstance(op.get("page"), str):
+                counts[op["page"]] = counts.get(op["page"], 0) + 1
+    merged = sorted(p for p, c in counts.items() if c > 1)
+    body = "\n\n".join(blocks)
+    if merged:
+        body += "\n\n---\n\n" + "\n".join(
+            f"- {p} : touchée par {counts[p]} unités, fusionnée en une seule page."
+            for p in merged
+        )
+    return body
 
 
 def run_dry_run() -> tuple[str, str]:
@@ -468,7 +492,11 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
                 u_notes.append(f"Page interdite : {page!r}")
                 failed = True
                 continue
-            written = _write_page(usage, policy, op)
+            # Cumulative build: start from what this dream already produced for
+            # this path (an earlier unit, then this unit), else the on-disk page.
+            # So several units that touch the same page merge instead of clobber.
+            current = u_writes.get(page) or writes.get(page) or _read(page)
+            written = _write_page(usage, policy, op, current)
             if not written:
                 u_notes.append(f"Écriture échouée pour {page}.")
                 failed = True
