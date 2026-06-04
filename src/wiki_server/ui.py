@@ -329,7 +329,7 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        from wiki_server.dream import list_reports, usage_summary
+        from wiki_server.dream import MODES, list_reports, read_schedule, usage_summary
 
         reports = list_reports()
         rows = "".join(
@@ -376,11 +376,31 @@ def register_ui(
             '<button class="btn" type="submit">Execute a dream (apply)</button>'
             '</form>'
         )
+        sched = read_schedule()
+        mode_opts = "".join(
+            f'<option value="{m}"{" selected" if m == sched["mode"] else ""}>{m}</option>'
+            for m in MODES
+        )
+        schedule_card = (
+            '<section class="card"><h2>Nightly dream (automatique)</h2>'
+            "<p class='muted'>off : rien. dry-run : propose chaque nuit (tu valides au matin). "
+            "execute : applique chaque nuit. Une seule fois par jour, apres l'heure choisie "
+            f"({html.escape(sched['tz'])}).</p>"
+            '<form method="post" action="/ui/dream/schedule">'
+            f'<input type="hidden" name="csrf" value="{token}">'
+            f'<div class="field"><label for="s-mode">Mode</label>'
+            f'<select id="s-mode" name="mode">{mode_opts}</select></div>'
+            f'<div class="field"><label for="s-hour">Heure locale (0-23)</label>'
+            f'<input type="number" id="s-hour" name="hour" min="0" max="23" value="{sched["hour"]}"></div>'
+            '<button class="btn" type="submit">Enregistrer la planification</button>'
+            '</form></section>'
+        )
         body = (
             "<p class='muted'>A dry-run proposes a consolidation and changes nothing. "
             "Execute applies it: files short-term memory into long-term pages and "
             "temporal items, in one revertible commit. Nothing is ever deleted.</p>"
-            f"<div class='toolbar'>{dry_form}{exec_form}</div>{cost_html}{reports_html}"
+            f"<div class='toolbar'>{dry_form}{exec_form}</div>"
+            f"{schedule_card}{cost_html}{reports_html}"
         )
         return _page("Dreams", body, login=login)
 
@@ -414,6 +434,16 @@ def register_ui(
         from wiki_server.dream import reset_usage
 
         reset_usage()
+        return RedirectResponse("/ui/dream", status_code=303)
+
+    @mcp.custom_route("/ui/dream/schedule", methods=["POST"])
+    async def ui_dream_schedule(request: Request) -> Response:
+        login, form, err = await require_post(request)
+        if err:
+            return err
+        from wiki_server.dream import set_schedule
+
+        set_schedule(form.get("mode"), form.get("hour"))
         return RedirectResponse("/ui/dream", status_code=303)
 
     # ---- prompts (editable policy + stage prompts) ----

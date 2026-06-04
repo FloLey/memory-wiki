@@ -10,6 +10,16 @@ self-contained `memory-wiki/` folder, so it can be lifted into its own repo
 later with a folder copy. The code is path-agnostic via the `WIKI_ROOT`
 environment variable.
 
+## Status: Nightly dream (automatic schedule)
+
+The dream can run **on its own, once a night**, via an in-process scheduler thread
+started with the server. The mode is set from the console (`/ui/dream`) and stored
+in the wiki (`dream_schedule.json`): `off` (default), `dry-run` (propose nightly,
+review in the morning), or `execute` (apply nightly). It fires once a day after a
+chosen local hour; "once a day" is enforced by the presence of the day's report,
+so restarts never double-run and a missed night is caught up. Nothing happens
+until you switch it on.
+
 ## Status: Slice 9 (staged dream pipeline + editable prompts)
 
 The dream now runs as a **three-stage pipeline** instead of one big call:
@@ -218,8 +228,14 @@ memory-wiki/
   seed/                   # initial wiki content, copied into the volume once
 ```
 
-## Roadmap (next slices)
+## Roadmap (next)
 
-Auth (OAuth), `remember()` short-term writing, `search_wiki`, the remaining read
-tools, the consolidation daemon, the weekly digest, and the web UI. See the full
-specification for the phased plan.
+Built so far: OAuth, `remember()` + the lean read/search tools, the web console,
+the staged dream (dry-run, execute, editable prompts, per-stage model + cost),
+temporal items, the people/places/organizations taxonomy, and the automatic
+nightly schedule. The codebase is split into focused modules with a pytest suite
+run in CI.
+
+Still open from the original vision: the **weekly digest** (a periodic summary of
+what changed and what is coming up). Optional later: notifications, and a "reorg"
+dream to fold residual duplicate pages.
