@@ -110,7 +110,7 @@ def write_stm_entry(
     where ``name`` is the descriptive filename stem.
 
     ``due`` (a date the daemon can use to file the item as temporal) and ``kind``
-    (todo / reminder / event / souvenir) are optional hints stored in the entry
+    (todo / reminder / event) are optional hints stored in the entry
     frontmatter; the daemon decides what to do with them."""
     clean_tags = _clean_tags(tags)
     tag_list = ", ".join(clean_tags)

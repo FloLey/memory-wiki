@@ -1,7 +1,8 @@
-"""Temporal items: dated, transient things (todos, reminders, events, temporary
-memories) that live until a date or until done, then get archived. They sit in
-their own area ``temporal/`` next to long_term/ and short_term/, so they do not
-pollute the durable knowledge.
+"""Temporal items: dated, transient things (todos, reminders, events) that live
+until a date or until done, then get archived. Every item has a ``due`` date (its
+"active until"); something durable with no expiry is not a temporal item, it
+belongs on a long-term page. They sit in their own area ``temporal/`` next to
+long_term/ and short_term/, so they do not pollute the durable knowledge.
 
 Lifecycle: status active -> expired (the ``due`` date, meaning "active until",
 has passed) or done. Nothing is ever deleted. The daemon files dated short-term
@@ -16,7 +17,7 @@ from wiki_server.paths import resolve_under_root, wiki_root
 from wiki_server.store import fm_value, parse_frontmatter, slugify, unique_stem
 
 TEMPORAL_DIR = "temporal"
-KINDS = ("todo", "reminder", "event", "souvenir")
+KINDS = ("todo", "reminder", "event")
 
 
 def item_stem(content: str, due: str | None, created: str | None, taken: set[str] | None = None) -> str:

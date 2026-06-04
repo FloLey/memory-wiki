@@ -440,14 +440,21 @@ def register_ui(
         path_field = (
             f'<input type="text" name="path" value="{html.escape(rel)}" {path_attr}>'
         )
-        delete_btn = ""
+        # Delete lives visually in the actions row but submits a sibling form via
+        # the HTML5 form= attribute, so it is not nested inside the save form
+        # (nested forms are invalid and the browser would route Delete to save).
+        delete_button = ""
+        delete_form = ""
         if rel and not is_new:
-            delete_btn = (
-                f'<form method="post" action="/ui/delete" style="display:inline" '
+            delete_button = (
+                '<button class="btn danger" type="submit" form="delete-form">Delete</button>'
+            )
+            delete_form = (
+                f'<form id="delete-form" method="post" action="/ui/delete" '
                 f'onsubmit="return confirm(\'Delete {html.escape(rel)}?\')">'
                 f'<input type="hidden" name="csrf" value="{token}">'
                 f'<input type="hidden" name="path" value="{html.escape(rel)}">'
-                f'<button class="btn danger" type="submit">Delete</button></form>'
+                f'</form>'
             )
         cancel = f"/ui/page/{quote(rel)}" if rel and not is_new else "/ui"
         body = (
@@ -457,8 +464,9 @@ def register_ui(
             f'<div class="field"><label>Content (markdown)</label>'
             f'<textarea name="content">{html.escape(content)}</textarea></div>'
             f'<div class="actions"><button class="btn" type="submit">Save</button>'
-            f'<a class="btn ghost" href="{cancel}">Cancel</a>{delete_btn}</div>'
+            f'<a class="btn ghost" href="{cancel}">Cancel</a>{delete_button}</div>'
             f'</form>'
+            f'{delete_form}'
         )
         name = rel.rsplit("/", 1)[-1] if rel else ""
         crumb = rel[: -len(name) - 1] if rel and "/" in rel else ""
@@ -517,6 +525,14 @@ def register_ui(
             else "<p class='muted'>No dream reports yet.</p>"
         )
         u = usage_summary()
+        token = csrf_token(login)
+        reset_cost_form = (
+            '<form method="post" action="/ui/dream/reset-cost" '
+            "onsubmit=\"return confirm('Reset the cost counter to zero?')\">"
+            f'<input type="hidden" name="csrf" value="{token}">'
+            '<button class="btn ghost" type="submit">Reset cost</button>'
+            '</form>'
+        )
         cost_html = (
             '<section class="card"><h2>Cost (estimated)</h2>'
             '<table><tbody>'
@@ -527,9 +543,9 @@ def register_ui(
             '</tbody></table>'
             '<p class="muted">Token counts are exact; cost is estimated from '
             'Anthropic list prices for the model (per 1M tokens).</p>'
+            f'{reset_cost_form}'
             '</section>'
         )
-        token = csrf_token(login)
         dry_form = (
             '<form method="post" action="/ui/dream/run">'
             f'<input type="hidden" name="csrf" value="{token}">'
@@ -578,6 +594,19 @@ def register_ui(
 
         rel, _ = await run_in_threadpool(run_execute)
         return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
+
+    @mcp.custom_route("/ui/dream/reset-cost", methods=["POST"])
+    async def ui_dream_reset_cost(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        if not csrf_ok(login, form.get("csrf")):
+            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        from wiki_server.dream import reset_usage
+
+        reset_usage()
+        return RedirectResponse("/ui/dream", status_code=303)
 
     # ---- prompts (editable policy + stage prompts) ----
     @mcp.custom_route("/ui/prompts", methods=["GET"])

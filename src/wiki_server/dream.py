@@ -366,6 +366,11 @@ def read_usage() -> list[dict]:
         return []
 
 
+def reset_usage() -> None:
+    """Clear the cost ledger so tracking starts over. The history stays in git."""
+    write_files({USAGE_FILE: "[]\n"}, "manual: reset dream cost ledger")
+
+
 def usage_summary() -> dict:
     entries = read_usage()
     total = sum(float(e.get("cost", 0)) for e in entries)
@@ -562,6 +567,16 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
                 continue
             due = t.get("due")
             due = due.strip() if isinstance(due, str) and due.strip().lower() not in ("", "null", "none") else None
+            # A temporal item must expire: require a valid ISO due, else it would
+            # sit active forever. Without one it is a durable fact, not temporal.
+            if not due:
+                u_notes.append(f"Item temporel sans échéance ignoré : {content[:60]}")
+                continue
+            try:
+                datetime.date.fromisoformat(due[:10])
+            except ValueError:
+                u_notes.append(f"Item temporel à échéance invalide ignoré : {due!r}")
+                continue
             stem = temporal.item_stem(content, due, None, temporal_taken | u_temporal)
             u_temporal.add(stem)
             rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)

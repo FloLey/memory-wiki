@@ -57,15 +57,20 @@ fournis dans touched_pages comme chemins canoniques, sans inventer de variante :
 integrate si la page a déjà du contenu, promote si elle est vide (nouvelle). Si
 rien n'est assez mûr,
 laisse l'entrée en court terme (listes vides). Pour les items temporels : type
-(todo/reminder/event/souvenir) et
-"due" = la date jusqu'à laquelle l'item reste actif (date de fin pour un séjour
-borné). Ne sur-fusionne pas : plusieurs choses datées distinctes dans une même
-unité donnent un item temporel chacune, avec sa propre échéance.
+(todo/reminder/event) et "due" OBLIGATOIRE = la date (YYYY-MM-DD) jusqu'à laquelle
+l'item reste actif (échéance d'une tâche, date de fin d'un séjour). Un item
+temporel a toujours une fin : s'il n'a pas de date d'expiration, ce n'est pas un
+item temporel mais un fait durable, qui va alors sur une page long terme (avec sa
+date dans le texte), jamais dans temporal/. Ne sur-fusionne pas : plusieurs choses
+datées distinctes dans une même unité donnent un item temporel chacune, avec sa
+propre échéance.
 
 Sépare le fait durable de son emballage daté. Une chose datée mentionne souvent
 un fait qui, lui, est durable : une personne, une relation, un lieu, une
-préférence. Dans ce cas, produis À LA FOIS l'item temporel pour la partie datée
-ET une page (promote ou integrate) pour la partie durable. Une personne ou une
+préférence. Produis une page (promote ou integrate) pour la partie durable, et un
+item temporel pour la partie datée seulement si elle a une date de fin. Un
+événement marquant mais sans échéance (une naissance, une rencontre) est un fait
+durable : il va sur la page concernée, pas dans temporal/. Une personne ou une
 relation qui revient mérite sa page même si elle n'apparaît que dans des choses
 datées. Tu ne supprimes jamais.
 """
@@ -99,12 +104,14 @@ SCHEMAS = {
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'
         '{"pages": [{"action": "integrate|promote", "page": "long_term/<chemin>.md", '
         '"change": "<ce qu\'on ajoute/fusionne>"}], '
-        '"temporal": [{"type": "todo|reminder|event|souvenir", "due": "YYYY-MM-DD ou null", "content": "<texte>"}], '
+        '"temporal": [{"type": "todo|reminder|event", "due": "YYYY-MM-DD", "content": "<texte>"}], '
         '"rationale": "<courte justification>"}\n'
         '"pages" et "temporal" sont des LISTES. Une entrée peut toucher plusieurs pages '
         '(personnes, projets, sujets) et/ou plusieurs choses datées : mets une opération '
         'par page (integrate pour une page existante, promote pour une nouvelle) et un '
-        'item par chose datée. Tout vide = garder l\'entrée en court terme.'
+        'item par chose datée. Chaque item temporel a une "due" (YYYY-MM-DD) obligatoire ; '
+        'sans échéance, ce n\'est pas un item temporel mais un fait durable (une page). '
+        'Tout vide = garder l\'entrée en court terme.'
     ),
     "write": (
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'

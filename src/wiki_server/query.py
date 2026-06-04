@@ -8,6 +8,8 @@ it can be swapped for ripgrep later if it ever feels slow.
 
 from __future__ import annotations
 
+import datetime
+
 from wiki_server.paths import resolve_under_root, wiki_root
 
 # Self pages, in the order Claude should read them to ground itself.
@@ -76,10 +78,21 @@ def build_prime() -> str:
         if p.is_file():
             sections.append(f"## {rel}\n\n{_safe_read(p)}")
 
-    # Active temporal items (todos, reminders, events, temporary memories).
+    # Active temporal items (todos, reminders, events). Also hide anything whose
+    # due (active-until) is already past, even if no dream has expired it yet, so
+    # what Claude sees is only what is still current.
     from wiki_server import temporal
 
-    active = temporal.list_items(active_only=True)
+    today = datetime.date.today()
+
+    def _still_current(item: dict) -> bool:
+        due = item["meta"].get("due", "")
+        try:
+            return datetime.date.fromisoformat(str(due)[:10]) >= today
+        except ValueError:
+            return True  # missing or malformed due: cannot date it, keep it
+
+    active = [i for i in temporal.list_items(active_only=True) if _still_current(i)]
     if active:
         lines = [
             f"- [{i['meta'].get('type', 'item')}] {i['body'].splitlines()[0] if i['body'] else ''}"

@@ -33,7 +33,8 @@ per stage via `WIKI_DREAM_MODEL_TRIAGE` / `_DECIDE` / `_WRITE`.
 Adds two things:
 
 - **Temporal items** (`temporal/`): dated, transient things (todo, reminder,
-  event, souvenir) that live until a date or until done, then are archived.
+  event) that live until a date, then are archived. Every item has a due date; a
+  durable fact with no expiry belongs on a long-term page, not here.
   `remember` takes optional `due` and `type`; the daemon files dated captures here
   rather than into long-term knowledge; `prime()` surfaces the active ones.
 - **Dream execution**: the dream can now **apply** a plan (not just propose). The

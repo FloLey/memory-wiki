@@ -189,10 +189,10 @@ def remember(
     later (into a long-term page, or into temporal/ if it is dated or actionable).
 
     Use it whenever the user mentions something worth keeping: a fact, a decision,
-    a preference, a project, but also a task, a reminder, an event, or a temporary
-    thing. For dated or actionable items, set ``due`` (a date like 2026-06-15) and
-    ``type`` (one of: todo, reminder, event, souvenir). ``summary`` is an optional
-    one-line label and ``tags`` an optional list of short tags.
+    a preference, a project, but also a task, a reminder, or an event. For dated or
+    actionable items, set ``due`` (a date like 2026-06-15) and ``type`` (one of:
+    todo, reminder, event). ``summary`` is an optional one-line label and ``tags``
+    an optional list of short tags.
     """
     if not content.strip():
         raise ToolError("Nothing to remember: content is empty.")
