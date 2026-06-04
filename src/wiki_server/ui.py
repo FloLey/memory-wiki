@@ -359,7 +359,14 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        files = _list_md_files()
+        # The overview shows the memory itself. Machinery (policy, prompts, dream
+        # reports) has its own tabs (Prompts, Dreams), so hide it here.
+        hidden_top = {"dream_reports", "prompts"}
+        hidden_files = {"DREAM.md"}
+        files = [
+            f for f in _list_md_files()
+            if f.split("/", 1)[0] not in hidden_top and f not in hidden_files
+        ]
         if not files:
             body = "<div class='empty'>No pages yet. Use <strong>New page</strong> to add one.</div>"
             return _page("Overview", body, login=login)
