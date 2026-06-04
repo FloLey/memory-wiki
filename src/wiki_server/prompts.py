@@ -38,6 +38,16 @@ indique :
   promote (un sujet durable sans page encore), temporal (une chose datée ou
   actionnable), keep (pas assez mûr, à laisser en court terme).
 
+Désambiguïse les homonymes. Avant de réutiliser une page existante pour une
+personne (ou un lieu, une organisation), vérifie dans la description de l'index
+que c'est bien le MÊME individu. Si c'est quelqu'un de différent qui porte le même
+prénom, ne réutilise pas sa page : propose un chemin distinct avec un qualificatif
+(relation, rôle, nom de famille, contexte), par ex. people/louis-frere-de-maryse.md
+vs people/louis-collegue.md. Le prénom nu reste pour le premier ; les suivants
+sont qualifiés. Ne fonds jamais deux personnes distinctes dans une seule page. Si
+deux personnes différentes du même prénom apparaissent dans le lot, donne-leur des
+chemins distincts.
+
 L'indice est une tendance, pas une contrainte : un même groupe peut avoir une
 part durable et une part datée, et l'étape suivante pourra produire les deux.
 Sois sélectif et fidèle ; n'invente rien et ne déduis pas au-delà du texte.
@@ -54,8 +64,12 @@ terme touchée (integrate pour une page existante, promote pour une nouvelle), e
 un item par chose datée. Une entrée qui mentionne plusieurs personnes, projets ou
 sujets touche donc une page par sujet, pas une seule. Reprends les chemins exacts
 fournis dans touched_pages comme chemins canoniques, sans inventer de variante :
-integrate si la page a déjà du contenu, promote si elle est vide (nouvelle). Si
-rien n'est assez mûr,
+integrate si la page a déjà du contenu, promote si elle est vide (nouvelle).
+N'intègre que si la page existante décrit bien le MÊME individu : si le contenu
+montre que c'est une autre personne qui porte le même prénom, ne l'écrase pas,
+promote plutôt une nouvelle page avec un slug qualifié (relation, rôle, nom de
+famille). Deux personnes distinctes ne partagent jamais une page. Si rien n'est
+assez mûr,
 laisse l'entrée en court terme (listes vides). Pour les items temporels : type
 (todo/reminder/event) et "due" OBLIGATOIRE = la date (YYYY-MM-DD) jusqu'à laquelle
 l'item reste actif (échéance d'une tâche, date de fin d'un séjour). Un item
