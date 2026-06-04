@@ -196,8 +196,8 @@ def remember(
     """
     if not content.strip():
         raise ToolError("Nothing to remember: content is empty.")
-    entry_id, created = write_stm_entry(content, summary=summary, tags=tags, due=due, kind=type)
-    return f"Remembered as short-term entry {entry_id} ({created})."
+    name, created = write_stm_entry(content, summary=summary, tags=tags, due=due, kind=type)
+    return f"Remembered as short_term/entries/{name}.md ({created})."
 
 
 @mcp.custom_route("/health", methods=["GET"])

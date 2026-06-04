@@ -70,7 +70,9 @@ sujet, personne, projet, idée), pas par tags.
   pour une prochaine nuit.
 - Temporal : si une entrée est datée ou actionnable (tâche, rappel, événement
   borné, souvenir temporaire), range-la dans temporal/ plutôt qu'en long terme.
-  Elle vit jusqu'à sa date, puis est archivée automatiquement.
+  La date "due" est la date JUSQU'À LAQUELLE l'item reste actif (date de fin pour
+  un événement ou séjour borné, date limite pour une tâche). Passé cette date,
+  l'item est archivé automatiquement.
 
 Tu ne jettes jamais. Tu ne supprimes rien. Dans le doute, garde.
 
@@ -160,8 +162,9 @@ Produis ton plan de consolidation sous forme de rapport markdown clair. Pour
 chaque groupe d'entrées liées : l'action choisie (integrer / promouvoir / garder
 / temporal), la page ou la destination cible (chemin), la justification en une
 ligne, et, le cas échéant, le contenu rédigé proposé. Pour une action temporal,
-précise le type (todo / reminder / event / souvenir) et la date. Termine par les
-éventuelles réorganisations, liens à créer, et mises à jour de l'index."""
+précise le type (todo / reminder / event / souvenir) et la date "due" = la date
+jusqu'à laquelle l'item reste actif (date de fin pour un séjour borné). Termine
+par les éventuelles réorganisations, liens à créer, et mises à jour de l'index."""
 
 
 def _ask_model(prompt: str) -> tuple[str, int, int]:
@@ -321,7 +324,7 @@ bloc de code) avec ce schéma :
   "pages": [{{"path": "long_term/<categorie>/<nom>.md", "content": "<markdown COMPLET final de la page, liens markdown inclus>"}}],
   "index": "<contenu COMPLET final de long_term/index.md, à jour>",
   "temporal": [{{"type": "todo|reminder|event|souvenir", "due": "YYYY-MM-DD ou null", "content": "<texte>"}}],
-  "consumed_stm": [<id des entrées court terme que tu as classées (en page ou en temporal)>],
+  "consumed_stm": ["<nom de fichier des entrées court terme que tu as classées>"],
   "summary": "<résumé en une phrase>"
 }}
 
@@ -330,8 +333,13 @@ Règles :
 - Pour "promouvoir", crée une nouvelle page sous une des cinq catégories.
 - Les chemins de "pages" commencent par long_term/ et finissent par .md.
 - "temporal" : les entrées datées ou actionnables vont là, pas en long terme.
-- "consumed_stm" : seulement les entrées que tu as effectivement classées. Celles
-  que tu gardes (pas assez mûres) : ne les liste pas, elles restent en court terme.
+  Le champ "due" est la date (YYYY-MM-DD) JUSQU'À LAQUELLE l'item reste actif :
+  pour un événement ou séjour borné, mets la date de FIN ; pour une tâche, la date
+  limite. Mets la plage lisible (ex. "du 26 au 30 juin") dans "content". Le fichier
+  est nommé automatiquement, tu n'as pas à donner de chemin pour temporal.
+- "consumed_stm" : les NOMS DE FICHIER des entrées court terme que tu as classées
+  (tels qu'affichés ci-dessus, ex. 2026-06-03-voyage-venise). Celles que tu gardes
+  (pas assez mûres) : ne les liste pas, elles restent en court terme.
 - Tu ne supprimes rien d'autre.
 """
 
@@ -437,10 +445,10 @@ def _apply_plan(plan: dict, writes: dict, deletes: list, notes: list) -> None:
         writes["long_term/index.md"] = index
         notes.append("Updated long_term/index.md")
 
-    # Temporal items.
-    next_id = temporal.next_temporal_id()
+    # Temporal items (descriptive, unique filenames).
     temporal_items = plan.get("temporal")
     if isinstance(temporal_items, list):
+        taken: set[str] = set()
         for item in temporal_items:
             if not isinstance(item, dict):
                 continue
@@ -450,22 +458,31 @@ def _apply_plan(plan: dict, writes: dict, deletes: list, notes: list) -> None:
             content = str(item.get("content", "")).strip()
             if not content:
                 continue
-            rel, file_content = temporal.build_item(next_id, kind, due, content)
+            stem = temporal.item_stem(content, due, None, taken)
+            taken.add(stem)
+            rel, file_content = temporal.build_item(stem, kind, due, content)
             writes[rel] = file_content
             notes.append(f"Created temporal {rel}")
-            next_id += 1
 
     # Consumed short-term entries: delete files and rebuild the STM index. Guard
-    # the type: a stray string like "12" would otherwise iterate into chars and
-    # delete the wrong entries.
+    # the type (a stray string would otherwise iterate into chars), and accept a
+    # filename, a stem, or a full path.
     consumed_raw = plan.get("consumed_stm")
-    consumed = {str(i) for i in consumed_raw if i is not None} if isinstance(consumed_raw, list) else set()
+    consumed: set[str] = set()
+    if isinstance(consumed_raw, list):
+        for c in consumed_raw:
+            if c is None:
+                continue
+            name = str(c).strip().split("/")[-1]
+            name = name[:-3] if name.endswith(".md") else name
+            if name:
+                consumed.add(name)
     if consumed:
-        for cid in consumed:
-            entry_rel = f"short_term/entries/{cid}.md"
+        for stem in consumed:
+            entry_rel = f"short_term/entries/{stem}.md"
             if resolve_under_root(entry_rel).is_file():
                 deletes.append(entry_rel)
-        writes["short_term/index.md"] = stm_index_content(exclude_ids=consumed)
+        writes["short_term/index.md"] = stm_index_content(exclude_stems=consumed)
         notes.append(f"Consumed short-term entries: {', '.join(sorted(consumed))}")
 
     summary = plan.get("summary")

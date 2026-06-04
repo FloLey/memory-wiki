@@ -9,8 +9,10 @@ Everything stays plain markdown under ``WIKI_ROOT``; there is no database.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import threading
+import unicodedata
 from datetime import datetime, timezone
 
 from wiki_server.paths import resolve_under_root, wiki_root
@@ -22,8 +24,8 @@ STM_INDEX_HEADER = (
     "# Short-term memory index\n\n"
     "Fresh, uncurated captures. Open and fast to write. Consolidated nightly into\n"
     "long-term memory by the dream daemon.\n\n"
-    "| id | created | summary | tags |\n"
-    "|----|---------|---------|------|\n"
+    "| entry | created | summary | tags |\n"
+    "|-------|---------|---------|------|\n"
 )
 
 _GIT_CONFIG = [
@@ -60,6 +62,25 @@ def next_stm_id() -> int:
     return (max(ids) + 1) if ids else 1
 
 
+def slugify(text: str, maxlen: int = 60) -> str:
+    """A readable, ascii, hyphenated slug for a filename. Empty -> 'note'."""
+    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
+    return text[:maxlen].strip("-") or "note"
+
+
+def unique_stem(dir_rel: str, base: str, taken: set[str] | None = None) -> str:
+    """A filename stem (no extension) unique in ``dir_rel`` and not in ``taken``
+    (other names being created in the same batch)."""
+    taken = taken or set()
+    directory = resolve_under_root(dir_rel)
+    candidate, n = base, 2
+    while candidate in taken or (directory / f"{candidate}.md").exists():
+        candidate = f"{base}-{n}"
+        n += 1
+    return candidate
+
+
 def git_commit(message: str) -> bool:
     """Best-effort commit of the whole wiki. Never raises: a commit hiccup must
     not lose a memory that is already written to disk."""
@@ -84,8 +105,9 @@ def write_stm_entry(
     tags: list[str] | None = None,
     due: str | None = None,
     kind: str | None = None,
-) -> tuple[int, str]:
-    """Write a new short-term entry and update the index. Returns (id, created).
+) -> tuple[str, str]:
+    """Write a new short-term entry and update the index. Returns (name, created)
+    where ``name`` is the descriptive filename stem.
 
     ``due`` (a date the daemon can use to file the item as temporal) and ``kind``
     (todo / reminder / event / souvenir) are optional hints stored in the entry
@@ -93,21 +115,23 @@ def write_stm_entry(
     clean_tags = _clean_tags(tags)
     tag_list = ", ".join(clean_tags)
     body = content.strip()
+    label = summary.strip() or (body.splitlines()[0] if body.splitlines() else "note")
 
     with _write_lock:
-        entry_id = next_stm_id()
         created = _utc_now_iso()
+        stem = unique_stem(STM_ENTRIES_DIR, f"{created[:10]}-{slugify(label)}")
 
         entries_dir = resolve_under_root(STM_ENTRIES_DIR)
         entries_dir.mkdir(parents=True, exist_ok=True)
 
-        fm = [f"id: {entry_id}", f"created: {created}", f"tags: [{tag_list}]"]
+        fm = [f"created: {created}", f"tags: [{tag_list}]"]
         if due and fm_value(due):
             fm.append(f"due: {fm_value(due)}")
         if kind and fm_value(kind):
             fm.append(f"type: {fm_value(kind)}")
-        entry_path = resolve_under_root(f"{STM_ENTRIES_DIR}/{entry_id}.md")
-        entry_path.write_text("---\n" + "\n".join(fm) + f"\n---\n\n{body}\n", encoding="utf-8")
+        resolve_under_root(f"{STM_ENTRIES_DIR}/{stem}.md").write_text(
+            "---\n" + "\n".join(fm) + f"\n---\n\n{body}\n", encoding="utf-8"
+        )
 
         if not summary.strip():
             lines = body.splitlines()
@@ -120,10 +144,10 @@ def write_stm_entry(
             index_path.parent.mkdir(parents=True, exist_ok=True)
             index_path.write_text(STM_INDEX_HEADER, encoding="utf-8")
         with index_path.open("a", encoding="utf-8") as f:
-            f.write(f"| {entry_id} | {created} | {row_summary} | {tag_list} |\n")
+            f.write(f"| {stem} | {created} | {row_summary} | {tag_list} |\n")
 
-        git_commit(f"stm: remember entry {entry_id}")
-        return entry_id, created
+        git_commit(f"stm: remember {stem}")
+        return stem, created
 
 
 def fm_value(value: str) -> str:
@@ -149,22 +173,21 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
 def _stm_row(path) -> str:
     meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-    entry_id = meta.get("id", path.stem)
     created = meta.get("created", "")
     tags = meta.get("tags", "").strip().strip("[]").strip()
     lines = [ln for ln in body.splitlines() if ln.strip()]
     summary = (lines[0] if lines else "").replace("|", "/")[:100]
-    return f"| {entry_id} | {created} | {summary} | {tags} |"
+    return f"| {path.stem} | {created} | {summary} | {tags} |"
 
 
-def stm_index_content(exclude_ids: set[str] | None = None) -> str:
+def stm_index_content(exclude_stems: set[str] | None = None) -> str:
     """Rebuild the STM index content from the entry files, optionally excluding
-    some ids (used by the dream to drop consumed entries)."""
-    exclude = {str(i) for i in (exclude_ids or set())}
+    some entries by filename stem (used by the dream to drop consumed entries)."""
+    exclude = {str(i) for i in (exclude_stems or set())}
     entries_dir = resolve_under_root(STM_ENTRIES_DIR)
     rows = []
     if entries_dir.is_dir():
-        for p in sorted(entries_dir.glob("*.md"), key=lambda x: int(x.stem) if x.stem.isdigit() else 0):
+        for p in sorted(entries_dir.glob("*.md")):
             if p.stem in exclude:
                 continue
             rows.append(_stm_row(p))
