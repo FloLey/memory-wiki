@@ -219,6 +219,14 @@ def _stm_stem(name: str) -> str:
     return name[:-3] if name.endswith(".md") else name
 
 
+def _as_list(value) -> list:
+    """Normalize a field that should be a list but the model may return as a
+    single object or null."""
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
 def _decisions(usage: _Usage, policy: str, stm_entries: list[tuple[str, str]], notes: list) -> list[dict]:
     """Stage 1 (triage) + stage 2 (decide per unit). Returns [{unit, decision}]."""
     stm_map = {name: body for name, body in stm_entries}
@@ -253,13 +261,13 @@ def _decisions(usage: _Usage, policy: str, stm_entries: list[tuple[str, str]], n
     return pairs
 
 
-def _write_page(usage: _Usage, policy: str, decision: dict) -> dict | None:
-    """Stage 3: produce {content, description} for an integrate/promote page."""
-    page = decision.get("page", "")
+def _write_page(usage: _Usage, policy: str, op: dict) -> dict | None:
+    """Stage 3: produce {content, description} for one integrate/promote page op."""
+    page = op.get("page", "")
     current = _read(page)
     out = _stage(usage, "write",
                  f"<policy>\n{policy}\n</policy>\n\n"
-                 f"<decision>\n{json.dumps(decision, ensure_ascii=False)}\n</decision>\n\n"
+                 f"<operation>\n{json.dumps(op, ensure_ascii=False)}\n</operation>\n\n"
                  f"<current_page path=\"{page}\">\n{current or '(nouvelle page)'}\n</current_page>")
     return out if out and isinstance(out.get("content"), str) else None
 
@@ -370,16 +378,17 @@ def _format_decisions(pairs: list[dict]) -> str:
     for pair in pairs:
         u, d = pair["unit"], pair["decision"]
         stm_names = ", ".join(s for s in (u.get("stm") or []) if isinstance(s, str))
-        lines = [f"## {u.get('intent', '(unité)')}",
-                 f"- entrées : {stm_names}",
-                 f"- action : {d.get('action', '?')}"]
-        if d.get("page"):
-            lines.append(f"- cible : {d['page']}")
-        if d.get("change"):
-            lines.append(f"- changement : {d['change']}")
-        t = d.get("temporal")
-        if isinstance(t, dict) and t.get("content"):
-            lines.append(f"- temporal : {t.get('type')} (due {t.get('due')}) : {t.get('content')}")
+        lines = [f"## {u.get('intent', '(unité)')}", f"- entrées : {stm_names}"]
+        pages_ops = _as_list(d.get("pages"))
+        temporal_ops = _as_list(d.get("temporal"))
+        for op in pages_ops:
+            if isinstance(op, dict) and op.get("page"):
+                lines.append(f"- {op.get('action', 'write')} {op['page']} : {op.get('change', '')}")
+        for t in temporal_ops:
+            if isinstance(t, dict) and t.get("content"):
+                lines.append(f"- temporal : {t.get('type')} (due {t.get('due')}) : {t.get('content')}")
+        if not pages_ops and not temporal_ops:
+            lines.append("- action : garder en court terme")
         if d.get("rationale"):
             lines.append(f"- pourquoi : {d['rationale']}")
         blocks.append("\n".join(lines))
@@ -449,43 +458,68 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
 
     for pair in pairs:
         u, d = pair["unit"], pair["decision"]
-        action = d.get("action")
         stm_stems = {_stm_stem(n) for n in (u.get("stm") or []) if isinstance(n, str)}
+        # Per-element: every output that succeeds is applied. The short-term
+        # entries are only kept (for the next dream) when something in the unit
+        # failed, so what landed is durable and only the missing part is retried.
+        u_writes: dict[str, str] = {}
+        u_desc: dict[str, str] = {}
+        u_pages: set[str] = set()
+        u_temporal: set[str] = set()
+        u_notes: list[str] = []
+        failed = False
 
-        if action in ("integrate", "promote"):
-            page = d.get("page")
+        for op in _as_list(d.get("pages")):
+            if not isinstance(op, dict):
+                continue
+            page = op.get("page")
             if not (isinstance(page, str) and page.startswith("long_term/") and page.endswith(".md")):
-                notes.append(f"Décision ignorée (page invalide) : {page!r}")
+                u_notes.append(f"Page invalide : {page!r}")
+                failed = True
                 continue
             try:
                 resolve_under_root(page)
             except WikiPathError:
-                notes.append(f"Décision ignorée (page interdite) : {page!r}")
+                u_notes.append(f"Page interdite : {page!r}")
+                failed = True
                 continue
-            written = _write_page(usage, policy, d)
+            written = _write_page(usage, policy, op)
             if not written:
-                notes.append(f"Écriture échouée pour {page} ; entrée gardée.")
+                u_notes.append(f"Écriture échouée pour {page}.")
+                failed = True
                 continue
-            writes[page] = written["content"]
-            page_paths.add(page)
+            u_writes[page] = written["content"]
+            u_pages.add(page)
             if isinstance(written.get("description"), str) and written["description"].strip():
-                new_desc[page] = written["description"].strip()
-            consumed |= stm_stems
-            notes.append(f"Page {page} ({action}).")
-        elif action == "temporal":
-            t = d.get("temporal") or {}
+                u_desc[page] = written["description"].strip()
+            u_notes.append(f"Page {page} ({op.get('action', 'write')}).")
+
+        for t in _as_list(d.get("temporal")):
+            if not isinstance(t, dict):
+                continue
             content = str(t.get("content", "")).strip()
             if not content:
-                notes.append("Temporal sans contenu, ignoré ; entrée gardée.")
                 continue
             due = t.get("due")
             due = due.strip() if isinstance(due, str) and due.strip().lower() not in ("", "null", "none") else None
-            stem = temporal.item_stem(content, due, None, temporal_taken)
-            temporal_taken.add(stem)
+            stem = temporal.item_stem(content, due, None, temporal_taken | u_temporal)
+            u_temporal.add(stem)
             rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)
-            writes[rel] = file_content
+            u_writes[rel] = file_content
+            u_notes.append(f"Temporal {rel}.")
+
+        produced = bool(u_pages or u_temporal)
+        # Apply every successful output, whatever else in the unit failed.
+        writes.update(u_writes)
+        new_desc.update(u_desc)
+        page_paths |= u_pages
+        temporal_taken |= u_temporal
+        notes.extend(u_notes)
+        if produced and not failed:
             consumed |= stm_stems
-            notes.append(f"Temporal {rel}.")
+        elif failed:
+            kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
+            notes.append(f"Gardé en court terme (un élément a échoué, voir ci-dessus) : {kept}")
         else:
             kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
             notes.append(f"Gardé en court terme : {kept}")

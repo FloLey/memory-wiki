@@ -41,13 +41,16 @@ Tu décides quoi faire d'UNE unité. On te donne la politique (DREAM.md), l'unit
 (les textes court terme), et le contenu actuel des pages long terme qu'elle
 touche.
 
-Choisis une action : integrate (fondre dans une page existante), promote (créer
-une nouvelle page dans la bonne catégorie), temporal (chose datée ou
-actionnable), ou keep (laisser en court terme si pas assez mûr). Donne la page
-cible, ce que tu changes (en prose, pour relecture), les liens éventuels, et une
-justification courte. Pour temporal : type (todo/reminder/event/souvenir) et
+Une entrée peut concerner plusieurs sujets : liste une opération par page long
+terme touchée (integrate pour une page existante, promote pour une nouvelle), et
+un item par chose datée. Par exemple « vu Maryse, parlé de Fractaquin » touche la
+page de Maryse et celle du projet Fractaquin. Si rien n'est assez mûr, laisse
+l'entrée en court terme (listes vides). Pour temporal : type
+(todo/reminder/event/souvenir) et
 "due" = la date jusqu'à laquelle l'item reste actif (date de fin pour un séjour
-borné). Tu ne supprimes jamais.
+borné). Ne sur-fusionne pas : si une unité contient plusieurs choses datées
+distinctes (par ex. un événement et la tâche de préparation associée), produis un
+item temporal par chose, avec sa propre échéance. Tu ne supprimes jamais.
 """
 
 WRITE_DEFAULT = """# Prompt: write (étape 3)
@@ -72,11 +75,14 @@ SCHEMAS = {
     ),
     "decide": (
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'
-        '{"action": "integrate|promote|temporal|keep", "page": "long_term/<chemin>.md", '
-        '"change": "<ce qu\'on ajoute/fusionne>", '
-        '"temporal": {"type": "todo|reminder|event|souvenir", "due": "YYYY-MM-DD ou null", "content": "<texte>"}, '
-        '"links": ["long_term/<chemin>.md"], "rationale": "<courte justification>"}\n'
-        'Mets "temporal" à null si l\'action n\'est pas temporal. "page" à null pour keep/temporal.'
+        '{"pages": [{"action": "integrate|promote", "page": "long_term/<chemin>.md", '
+        '"change": "<ce qu\'on ajoute/fusionne>"}], '
+        '"temporal": [{"type": "todo|reminder|event|souvenir", "due": "YYYY-MM-DD ou null", "content": "<texte>"}], '
+        '"rationale": "<courte justification>"}\n'
+        '"pages" et "temporal" sont des LISTES. Une entrée peut toucher plusieurs pages '
+        '(personnes, projets, sujets) et/ou plusieurs choses datées : mets une opération '
+        'par page (integrate pour une page existante, promote pour une nouvelle) et un '
+        'item par chose datée. Tout vide = garder l\'entrée en court terme.'
     ),
     "write": (
         'Renvoie UNIQUEMENT cet objet JSON, sans texte autour ni bloc de code :\n'
