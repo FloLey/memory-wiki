@@ -44,7 +44,7 @@ AVAILABLE_MODELS = [
     ("claude-opus-4-8", "Opus 4.8 : le plus capable, le plus cher (5 / 25 $/M)"),
 ]
 _MODEL_IDS = {m for m, _ in AVAILABLE_MODELS}
-_CATEGORIES = ["self", "entities", "projects", "concepts", "sources"]
+_CATEGORIES = ["self", "people", "places", "organizations", "projects", "concepts", "sources"]
 _MAX_TOKENS = {"triage": 2048, "decide": 2048, "write": 8192}
 
 # Anthropic list prices per 1M tokens (USD), by model tier (2026). Unknown /
@@ -63,18 +63,21 @@ La mémoire stocke de l'information, sobrement : notes factuelles, claires,
 concises. Pas de style d'auteur, pas de voix, pas d'enjolivure, ton neutre. Tu ne
 jettes jamais, tu ne supprimes rien. Dans le doute, garde.
 
-## Les cinq catégories (fixes)
+## Les catégories (fixes)
 Tu ne crées jamais de nouvelle catégorie de haut niveau ; tu ranges dans l'une
-de ces cinq.
+de celles-ci.
 - self : Florent lui-même. Une seule page, self/identity.md, regroupe tous les
   faits durables sur lui (naissance, métier, etc.) ; tu intègres ces faits dans
   cette page unique et n'éclates jamais ses attributs en plusieurs pages self.
-  Les organisations, lieux ou personnes liés gardent leur propre page entities,
-  reliée par un lien.
-- entities : personnes, lieux, organisations, objets.
+- people : les personnes (famille, amis, collègues, connaissances).
+- places : les lieux.
+- organizations : les organisations et entreprises.
 - projects : ses projets.
 - concepts : idées, sujets, savoirs.
 - sources : livres, articles, références.
+
+Une personne, un lieu ou une organisation lié à un fait garde sa propre page
+dans sa catégorie, reliée par un lien.
 
 ## Liens
 Quand deux pages sont liées, relie-les par un lien markdown en chemin relatif,
@@ -225,25 +228,32 @@ def _parse_json(text: str) -> dict | None:
         return None
 
 
-def _stage(usage: _Usage, stage: str, context: str) -> dict | None:
-    """Run one pipeline stage: build the prompt, call the model, parse JSON.
-    Never raises: any failure (import, client init, API, parsing) returns None."""
+def _call_model(usage: _Usage, model: str, prompt: str, max_tokens: int) -> str | None:
+    """Call the model once and return its text. Never raises: any failure
+    (import, client init, API) returns None. Records token usage."""
     try:
         import anthropic
 
-        model = _model_for(stage)
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         message = client.messages.create(
             model=model,
-            max_tokens=_MAX_TOKENS.get(stage, 4096),
-            messages=[{"role": "user", "content": prompts.build(stage, context)}],
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(getattr(b, "text", "") for b in message.content if getattr(b, "type", "") == "text")
         u = getattr(message, "usage", None)
         usage.add(model, getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0)
-        return _parse_json(text)
+        return text
     except Exception:
         return None
+
+
+def _stage(usage: _Usage, stage: str, context: str) -> dict | None:
+    """Run one pipeline stage: build the prompt, call the model, parse JSON.
+    Returns None on any failure."""
+    text = _call_model(usage, _model_for(stage), prompts.build(stage, context),
+                       _MAX_TOKENS.get(stage, 4096))
+    return _parse_json(text) if text is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +338,32 @@ def _index_descriptions() -> dict[str, str]:
     return out
 
 
+def _render_index(paths: set[str], descs: dict[str, str]) -> str:
+    """Render the index from an explicit page set, grouped by top-level folder:
+    the known categories first (always shown, even empty), then any other folder
+    that still has pages (e.g. a legacy ``entities`` not yet migrated), so nothing
+    silently drops out of the index."""
+    by_folder: dict[str, list[str]] = {}
+    for full in paths:
+        if not full.startswith("long_term/") or full == "long_term/index.md":
+            continue
+        parts = full.split("/")
+        if len(parts) < 3:
+            continue
+        by_folder.setdefault(parts[1], []).append(full)
+    extra = sorted(f for f in by_folder if f not in _CATEGORIES)
+    lines = ["# Long-term memory index", "", "Catalogue des pages durables, par catégorie.", ""]
+    for folder in list(_CATEGORIES) + extra:
+        lines.append(f"## {folder}")
+        for full in sorted(by_folder.get(folder, [])):
+            rel_to_ltm = full[len("long_term/"):]
+            stem = full.rsplit("/", 1)[-1][:-3]
+            desc = descs.get(full, "")
+            lines.append(f"- [{stem}]({rel_to_ltm})" + (f" : {desc}" if desc else ""))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _regenerate_index(new_descriptions: dict[str, str], extra_pages: set[str]) -> str:
     descs = _index_descriptions()
     descs.update({k: v for k, v in new_descriptions.items() if v})
@@ -339,16 +375,7 @@ def _regenerate_index(new_descriptions: dict[str, str], extra_pages: set[str]) -
             if rel == "long_term/index.md" or "private" in p.relative_to(root).parts:
                 continue
             paths.add(rel)
-    lines = ["# Long-term memory index", "", "Catalogue des pages durables, par catégorie.", ""]
-    for cat in _CATEGORIES:
-        lines.append(f"## {cat}")
-        for full in sorted(p for p in paths if p.startswith(f"long_term/{cat}/")):
-            rel_to_ltm = full[len("long_term/"):]
-            stem = full.rsplit("/", 1)[-1][:-3]
-            desc = descs.get(full, "")
-            lines.append(f"- [{stem}]({rel_to_ltm})" + (f" : {desc}" if desc else ""))
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    return _render_index(paths, descs)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +396,109 @@ def read_usage() -> list[dict]:
 def reset_usage() -> None:
     """Clear the cost ledger so tracking starts over. The history stays in git."""
     write_files({USAGE_FILE: "[]\n"}, "manual: reset dream cost ledger")
+
+
+# ---------------------------------------------------------------------------
+# One-shot migration: split the legacy ``entities`` folder into people / places
+# / organizations (when the taxonomy changed). Atomic, git-reversible.
+# ---------------------------------------------------------------------------
+
+_MIGRATION_CATEGORIES = ("people", "places", "organizations")
+
+
+def _first_line(rel: str) -> str:
+    """First non-empty body line of a page (frontmatter stripped), for context."""
+    from wiki_server.store import parse_frontmatter
+
+    try:
+        _, body = parse_frontmatter(_read(rel))
+    except Exception:
+        body = _read(rel)
+    for line in body.splitlines():
+        s = line.strip().lstrip("#").strip()
+        if s:
+            return s[:120]
+    return ""
+
+
+def _rewrite_links(text: str, moves: dict[str, str]) -> str:
+    """Repoint markdown links from each old page path to its new one. Operates on
+    the path tail (``entities/<stem>.md`` -> ``<cat>/<stem>.md``), which covers
+    both ``../entities/x.md`` and ``entities/x.md`` forms; stems are unique."""
+    for old_full, new_full in moves.items():
+        text = text.replace(old_full[len("long_term/"):], new_full[len("long_term/"):])
+    return text
+
+
+def _classify_entities(usage: _Usage, items: list[tuple[str, str]]) -> dict[str, str]:
+    """One model call mapping each entity stem to people / places / organizations."""
+    listing = "\n".join(f"- {stem} : {first}" for stem, first in items)
+    prompt = (
+        "Classe chaque entité dans UNE catégorie parmi : people (une personne), "
+        "places (un lieu), organizations (une organisation ou entreprise).\n"
+        "Renvoie UNIQUEMENT un objet JSON, sans texte autour, de la forme "
+        '{"<nom>": "people|places|organizations"}.\n\n' + listing
+    )
+    data = _parse_json(_call_model(usage, _model_for("triage"), prompt, 1024) or "") or {}
+    return {k: v for k, v in data.items()
+            if isinstance(k, str) and isinstance(v, str) and v in _MIGRATION_CATEGORIES}
+
+
+def migrate_entities() -> tuple[str, str]:
+    """Move every page under long_term/entities/ into people/places/organizations,
+    rewrite all links, and regenerate the index, in one revertible commit."""
+    with _dream_lock:
+        when = datetime.datetime.now(datetime.timezone.utc)
+        day = when.date().isoformat()
+        rel_report = f"{DREAM_REPORTS_DIR}/{day}-migration.md"
+        ent = resolve_under_root("long_term/entities")
+        files = sorted(ent.glob("*.md")) if ent.is_dir() else []
+        if not files:
+            report = f"# Migration entities, {day}\n\nAucune page entities à migrer.\n"
+            write_files({rel_report: report}, f"manual: migration report {day}")
+            return rel_report, report
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return _no_key_report(day, dry=False)
+        try:
+            usage = _Usage()
+            root = wiki_root()
+            items = [(p.stem, _first_line(p.relative_to(root).as_posix())) for p in files]
+            mapping = _classify_entities(usage, items)
+
+            moves: dict[str, str] = {}
+            for p in files:
+                stem = p.stem
+                cat = mapping.get(stem, "people")  # default to people if unsure
+                moves[f"long_term/entities/{stem}.md"] = f"long_term/{cat}/{stem}.md"
+
+            writes: dict[str, str] = {}
+            deletes: list[str] = []
+            final_paths: set[str] = set()
+            for p in (root / "long_term").rglob("*.md"):
+                rel = p.relative_to(root).as_posix()
+                if rel == "long_term/index.md" or "private" in p.relative_to(root).parts:
+                    continue
+                new_rel = moves.get(rel, rel)
+                writes[new_rel] = _rewrite_links(_read(rel), moves)
+                final_paths.add(new_rel)
+                if new_rel != rel:
+                    deletes.append(rel)
+
+            descs = {moves.get(k, k): v for k, v in _index_descriptions().items()}
+            writes["long_term/index.md"] = _render_index(final_paths, descs)
+
+            notes = [f"{old} -> {new}" for old, new in sorted(moves.items())]
+            report = (f"# Migration entities, {day}\n\n"
+                      + "\n".join(f"- {n}" for n in notes) + "\n")
+            writes[rel_report] = report
+            entry = usage.entry(when)
+            if entry:
+                writes[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
+            apply_changes(writes, deletes,
+                          "manual: migrate entities into people/places/organizations")
+            return rel_report, report
+        except Exception:
+            return _error_report(day, dry=False)
 
 
 def usage_summary() -> dict:

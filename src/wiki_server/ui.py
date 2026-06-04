@@ -677,14 +677,47 @@ def register_ui(
             '<button class="btn" type="submit">Enregistrer les modeles</button>'
             '</form></section>'
         )
+        # One-shot migration, only offered while a legacy entities/ folder exists.
+        migrate_card = ""
+        try:
+            ent = resolve_under_root("long_term/entities")
+            has_entities = ent.is_dir() and any(ent.glob("*.md"))
+        except WikiPathError:
+            has_entities = False
+        if has_entities:
+            migrate_card = (
+                '<section class="card"><h2>Migration : entities -&gt; people / places / organizations</h2>'
+                "<p class='muted'>D'anciennes pages sont encore dans la categorie entities. "
+                "Cette action les classe (personne / lieu / organisation), les deplace, "
+                "reecrit les liens et regenere l'index, en un seul commit reversible.</p>"
+                '<form method="post" action="/ui/prompts/migrate-entities" '
+                "onsubmit=\"return confirm('Migrer les pages entities ? Un commit reversible.')\">"
+                f'<input type="hidden" name="csrf" value="{csrf_token(login)}">'
+                '<button class="btn" type="submit">Migrer entities</button>'
+                '</form></section>'
+            )
         body = (
             "<p class='muted'>La politique et les trois prompts du daemon sont editables. "
             "Le schema de sortie JSON est ajoute par le code, donc editer les consignes ne "
             "casse jamais le contrat machine.</p>"
             f"<section class='card'><ul class='filelist'>{''.join(rows)}</ul></section>"
-            f"{models_form}"
+            f"{models_form}{migrate_card}"
         )
         return _page("Prompts", body, login=login)
+
+    @mcp.custom_route("/ui/prompts/migrate-entities", methods=["POST"])
+    async def ui_prompts_migrate(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        if not csrf_ok(login, form.get("csrf")):
+            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        from starlette.concurrency import run_in_threadpool
+        from wiki_server.dream import migrate_entities
+
+        rel, _ = await run_in_threadpool(migrate_entities)
+        return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
 
     @mcp.custom_route("/ui/prompts/models", methods=["POST"])
     async def ui_prompts_models(request: Request) -> Response:
