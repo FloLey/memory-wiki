@@ -24,15 +24,21 @@ Tu es le trieur du Personal Memory Wiki. On te donne la politique (DREAM.md),
 toute la mémoire court terme, et l'index de la mémoire long terme (le catalogue,
 pas le contenu des pages).
 
-Regroupe les entrées court terme par cohérence de sens (même sujet, personne,
-projet, idée), pas par tags. Pour chaque groupe, indique :
+Regroupe les entrées court terme par cohérence de sens (même personne, projet,
+lieu, sujet ou idée), pas par tags ni par date d'écriture. Pour chaque groupe,
+indique :
 - les fichiers court terme concernés,
-- une intention courte,
-- les pages long terme existantes qu'il touche (chemins tirés de l'index, ou
-  vide si c'est un sujet nouveau),
-- un indice d'action (integrate / promote / temporal / keep).
+- une intention courte et neutre,
+- les pages long terme existantes qu'il touche (chemins tirés de l'index ; une
+  liste, car un même groupe peut concerner plusieurs pages ; vide si le sujet
+  est nouveau),
+- un indice d'action dominant : integrate (une page existante à enrichir),
+  promote (un sujet durable sans page encore), temporal (une chose datée ou
+  actionnable), keep (pas assez mûr, à laisser en court terme).
 
-Sois sélectif et fidèle ; n'invente rien.
+L'indice est une tendance, pas une contrainte : un même groupe peut avoir une
+part durable et une part datée, et l'étape suivante pourra produire les deux.
+Sois sélectif et fidèle ; n'invente rien et ne déduis pas au-delà du texte.
 """
 
 DECIDE_DEFAULT = """# Prompt: decide (étape 2)
@@ -43,34 +49,33 @@ touche.
 
 Une entrée peut concerner plusieurs sujets : liste une opération par page long
 terme touchée (integrate pour une page existante, promote pour une nouvelle), et
-un item par chose datée. Par exemple « vu Maryse, parlé de Fractaquin » touche la
-page de Maryse et celle du projet Fractaquin. Si rien n'est assez mûr, laisse
-l'entrée en court terme (listes vides). Pour les items temporels : type
+un item par chose datée. Une entrée qui mentionne plusieurs personnes, projets ou
+sujets touche donc une page par sujet, pas une seule. Si rien n'est assez mûr,
+laisse l'entrée en court terme (listes vides). Pour les items temporels : type
 (todo/reminder/event/souvenir) et
 "due" = la date jusqu'à laquelle l'item reste actif (date de fin pour un séjour
-borné). Ne sur-fusionne pas : si une unité contient plusieurs choses datées
-distinctes (par ex. un événement et la tâche de préparation associée), produis un
-item temporel par chose, avec sa propre échéance.
+borné). Ne sur-fusionne pas : plusieurs choses datées distinctes dans une même
+unité donnent un item temporel chacune, avec sa propre échéance.
 
-Sépare le fait durable de son emballage daté. Un événement daté mentionne souvent
-un fait qui, lui, est durable : une personne, une relation, un lieu. « Voyage à
-Venise avec Maud, ma copine » contient deux choses : le voyage (daté, borné ->
-un item temporel) ET le fait que Maud est la copine de Florent (durable -> une
-page long terme). Dans ce cas, produis À LA FOIS l'item temporel pour la partie
-datée ET une page (promote ou integrate) pour la partie durable. Une personne
-récurrente mérite sa page même si elle n'apparaît que dans des événements. Tu ne
-supprimes jamais.
+Sépare le fait durable de son emballage daté. Une chose datée mentionne souvent
+un fait qui, lui, est durable : une personne, une relation, un lieu, une
+préférence. Dans ce cas, produis À LA FOIS l'item temporel pour la partie datée
+ET une page (promote ou integrate) pour la partie durable. Une personne ou une
+relation qui revient mérite sa page même si elle n'apparaît que dans des choses
+datées. Tu ne supprimes jamais.
 """
 
 WRITE_DEFAULT = """# Prompt: write (étape 3)
 
 Tu écris UNE page de la mémoire long terme. On te donne la politique (DREAM.md),
-la décision, et le contenu actuel de la page (si on intègre).
+l'opération à appliquer, et le contenu actuel de la page (si elle existe déjà).
 
-Écris des notes factuelles, claires, concises. Pas de style d'auteur, pas de
-voix, neutre. Pour une intégration, produis le contenu COMPLET fusionné (pas un
-diff), sans dupliquer ni perdre d'information. Inclus les liens markdown utiles.
-Donne aussi une description d'une ligne de la page, pour l'index.
+Écris des notes factuelles, claires et concises. Pas de style d'auteur, pas de
+voix narrative, ton neutre. Pour une intégration, renvoie le contenu COMPLET
+fusionné (pas un diff), sans rien dupliquer ni perdre de l'existant. Pour une
+nouvelle page, structure l'essentiel sans la gonfler. Inclus les liens markdown
+utiles vers les pages connexes. Donne aussi une description d'une ligne pour
+l'index. N'invente rien qui ne soit pas dans la source ou la page actuelle.
 """
 
 DEFAULTS = {"triage": TRIAGE_DEFAULT, "decide": DECIDE_DEFAULT, "write": WRITE_DEFAULT}
