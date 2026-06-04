@@ -190,23 +190,24 @@ def _parse_json(text: str) -> dict | None:
 
 
 def _stage(usage: _Usage, stage: str, context: str) -> dict | None:
-    """Run one pipeline stage: build the prompt, call the model, parse JSON."""
-    import anthropic
-
-    model = _model_for(stage)
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    """Run one pipeline stage: build the prompt, call the model, parse JSON.
+    Never raises: any failure (import, client init, API, parsing) returns None."""
     try:
+        import anthropic
+
+        model = _model_for(stage)
+        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         message = client.messages.create(
             model=model,
             max_tokens=_MAX_TOKENS.get(stage, 4096),
             messages=[{"role": "user", "content": prompts.build(stage, context)}],
         )
+        text = "".join(getattr(b, "text", "") for b in message.content if getattr(b, "type", "") == "text")
+        u = getattr(message, "usage", None)
+        usage.add(model, getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0)
+        return _parse_json(text)
     except Exception:
         return None
-    text = "".join(b.text for b in message.content if b.type == "text")
-    u = getattr(message, "usage", None)
-    usage.add(model, getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0)
-    return _parse_json(text)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +344,25 @@ def _no_key_report(day: str, dry: bool) -> tuple[str, str]:
     return rel, report
 
 
+def _error_report(day: str, dry: bool) -> tuple[str, str]:
+    """Capture an unexpected failure into a report instead of crashing the
+    request, so the user sees the cause and the dream never returns a raw 500."""
+    import traceback
+
+    tb = traceback.format_exc()
+    suffix = "-dryrun" if dry else ""
+    rel = f"{DREAM_REPORTS_DIR}/{day}{suffix}.md"
+    report = (
+        f"# Dream {'dry-run' if dry else ''}, {day}\n\n"
+        f"Le rêve a échoué. Trace technique :\n\n```\n{tb}\n```\n"
+    )
+    try:
+        write_files({rel: report}, f"dream: error report {day}")
+    except Exception:
+        pass
+    return rel, report
+
+
 def _format_decisions(pairs: list[dict]) -> str:
     if not pairs:
         return "Aucune décision proposée."
@@ -373,26 +393,28 @@ def run_dry_run() -> tuple[str, str]:
         day = when.date().isoformat()
         if not os.environ.get("ANTHROPIC_API_KEY"):
             return _no_key_report(day, dry=True)
+        try:
+            policy = ensure_policy()
+            stm_entries = _read_stm_entries()
+            usage = _Usage()
+            notes: list[str] = []
+            if not stm_entries:
+                body = "Mémoire court terme vide. Rien à consolider."
+            else:
+                body = _format_decisions(_decisions(usage, policy, stm_entries, notes))
+            if notes:
+                body += "\n\n---\n\n" + "\n".join(f"- {n}" for n in notes)
 
-        policy = ensure_policy()
-        stm_entries = _read_stm_entries()
-        usage = _Usage()
-        notes: list[str] = []
-        if not stm_entries:
-            body = "Mémoire court terme vide. Rien à consolider."
-        else:
-            body = _format_decisions(_decisions(usage, policy, stm_entries, notes))
-        if notes:
-            body += "\n\n---\n\n" + "\n".join(f"- {n}" for n in notes)
-
-        report = f"# Dream dry-run, {day}\n\n{body}\n"
-        rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
-        files = {rel: report}
-        entry = usage.entry(when)
-        if entry:
-            files[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
-        write_files(files, f"dream: dry-run report {day}")
-        return rel, report
+            report = f"# Dream dry-run, {day}\n\n{body}\n"
+            rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
+            files = {rel: report}
+            entry = usage.entry(when)
+            if entry:
+                files[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
+            write_files(files, f"dream: dry-run report {day}")
+            return rel, report
+        except Exception:
+            return _error_report(day, dry=True)
 
 
 def run_execute() -> tuple[str, str]:
@@ -402,91 +424,97 @@ def run_execute() -> tuple[str, str]:
         day = when.date().isoformat()
         if not os.environ.get("ANTHROPIC_API_KEY"):
             return _no_key_report(day, dry=False)
+        try:
+            return _execute(when, day)
+        except Exception:
+            return _error_report(day, dry=False)
 
-        policy = ensure_policy()
-        stm_entries = _read_stm_entries()
-        usage = _Usage()
-        notes: list[str] = []
-        writes: dict[str, str] = {}
-        deletes: list[str] = []
 
-        pairs = _decisions(usage, policy, stm_entries, notes) if stm_entries else []
-        if not stm_entries:
-            notes.append("Mémoire court terme vide.")
+def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
+    policy = ensure_policy()
+    stm_entries = _read_stm_entries()
+    usage = _Usage()
+    notes: list[str] = []
+    writes: dict[str, str] = {}
+    deletes: list[str] = []
 
-        new_desc: dict[str, str] = {}
-        page_paths: set[str] = set()
-        consumed: set[str] = set()
-        temporal_taken: set[str] = set()
+    pairs = _decisions(usage, policy, stm_entries, notes) if stm_entries else []
+    if not stm_entries:
+        notes.append("Mémoire court terme vide.")
 
-        for pair in pairs:
-            u, d = pair["unit"], pair["decision"]
-            action = d.get("action")
-            stm_stems = {_stm_stem(n) for n in (u.get("stm") or []) if isinstance(n, str)}
+    new_desc: dict[str, str] = {}
+    page_paths: set[str] = set()
+    consumed: set[str] = set()
+    temporal_taken: set[str] = set()
 
-            if action in ("integrate", "promote"):
-                page = d.get("page")
-                if not (isinstance(page, str) and page.startswith("long_term/") and page.endswith(".md")):
-                    notes.append(f"Décision ignorée (page invalide) : {page!r}")
-                    continue
-                try:
-                    resolve_under_root(page)
-                except WikiPathError:
-                    notes.append(f"Décision ignorée (page interdite) : {page!r}")
-                    continue
-                written = _write_page(usage, policy, d)
-                if not written:
-                    notes.append(f"Écriture échouée pour {page} ; entrée gardée.")
-                    continue
-                writes[page] = written["content"]
-                page_paths.add(page)
-                if isinstance(written.get("description"), str) and written["description"].strip():
-                    new_desc[page] = written["description"].strip()
-                consumed |= stm_stems
-                notes.append(f"Page {page} ({action}).")
-            elif action == "temporal":
-                t = d.get("temporal") or {}
-                content = str(t.get("content", "")).strip()
-                if not content:
-                    notes.append("Temporal sans contenu, ignoré ; entrée gardée.")
-                    continue
-                due = t.get("due")
-                due = due.strip() if isinstance(due, str) and due.strip().lower() not in ("", "null", "none") else None
-                stem = temporal.item_stem(content, due, None, temporal_taken)
-                temporal_taken.add(stem)
-                rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)
-                writes[rel] = file_content
-                consumed |= stm_stems
-                notes.append(f"Temporal {rel}.")
-            else:
-                kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
-                notes.append(f"Gardé en court terme : {kept}")
+    for pair in pairs:
+        u, d = pair["unit"], pair["decision"]
+        action = d.get("action")
+        stm_stems = {_stm_stem(n) for n in (u.get("stm") or []) if isinstance(n, str)}
 
-        if page_paths or new_desc:
-            writes["long_term/index.md"] = _regenerate_index(new_desc, page_paths)
-            notes.append("Index régénéré.")
+        if action in ("integrate", "promote"):
+            page = d.get("page")
+            if not (isinstance(page, str) and page.startswith("long_term/") and page.endswith(".md")):
+                notes.append(f"Décision ignorée (page invalide) : {page!r}")
+                continue
+            try:
+                resolve_under_root(page)
+            except WikiPathError:
+                notes.append(f"Décision ignorée (page interdite) : {page!r}")
+                continue
+            written = _write_page(usage, policy, d)
+            if not written:
+                notes.append(f"Écriture échouée pour {page} ; entrée gardée.")
+                continue
+            writes[page] = written["content"]
+            page_paths.add(page)
+            if isinstance(written.get("description"), str) and written["description"].strip():
+                new_desc[page] = written["description"].strip()
+            consumed |= stm_stems
+            notes.append(f"Page {page} ({action}).")
+        elif action == "temporal":
+            t = d.get("temporal") or {}
+            content = str(t.get("content", "")).strip()
+            if not content:
+                notes.append("Temporal sans contenu, ignoré ; entrée gardée.")
+                continue
+            due = t.get("due")
+            due = due.strip() if isinstance(due, str) and due.strip().lower() not in ("", "null", "none") else None
+            stem = temporal.item_stem(content, due, None, temporal_taken)
+            temporal_taken.add(stem)
+            rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)
+            writes[rel] = file_content
+            consumed |= stm_stems
+            notes.append(f"Temporal {rel}.")
+        else:
+            kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
+            notes.append(f"Gardé en court terme : {kept}")
 
-        if consumed:
-            for stem in consumed:
-                entry_rel = f"short_term/entries/{stem}.md"
-                if resolve_under_root(entry_rel).is_file():
-                    deletes.append(entry_rel)
-            writes["short_term/index.md"] = stm_index_content(exclude_stems=consumed)
-            notes.append(f"Court terme consommé : {', '.join(sorted(consumed))}")
+    if page_paths or new_desc:
+        writes["long_term/index.md"] = _regenerate_index(new_desc, page_paths)
+        notes.append("Index régénéré.")
 
-        expirations = temporal.expire_changes(day)
-        writes.update(expirations)
-        if expirations:
-            notes.append(f"{len(expirations)} item(s) temporal expiré(s).")
+    if consumed:
+        for stem in consumed:
+            entry_rel = f"short_term/entries/{stem}.md"
+            if resolve_under_root(entry_rel).is_file():
+                deletes.append(entry_rel)
+        writes["short_term/index.md"] = stm_index_content(exclude_stems=consumed)
+        notes.append(f"Court terme consommé : {', '.join(sorted(consumed))}")
 
-        report = f"# Dream, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
-        rel = f"{DREAM_REPORTS_DIR}/{day}.md"
-        writes[rel] = report
-        entry = usage.entry(when)
-        if entry:
-            writes[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
-        apply_changes(writes, deletes, f"dream: {day} consolidation")
-        return rel, report
+    expirations = temporal.expire_changes(day)
+    writes.update(expirations)
+    if expirations:
+        notes.append(f"{len(expirations)} item(s) temporal expiré(s).")
+
+    report = f"# Dream, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    rel = f"{DREAM_REPORTS_DIR}/{day}.md"
+    writes[rel] = report
+    entry = usage.entry(when)
+    if entry:
+        writes[USAGE_FILE] = json.dumps(read_usage() + [entry], indent=2)
+    apply_changes(writes, deletes, f"dream: {day} consolidation")
+    return rel, report
 
 
 def list_reports() -> list[str]:
