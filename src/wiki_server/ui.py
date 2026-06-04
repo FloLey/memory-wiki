@@ -402,13 +402,20 @@ def register_ui(
             return PlainTextResponse("Forbidden.", status_code=403)
         if not path.is_file():
             return PlainTextResponse("Not found.", status_code=404)
-        rendered = _md.render(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+        rendered = _md.render(raw)
         name = rel.rsplit("/", 1)[-1]
         crumb = rel[: -len(name) - 1] if "/" in rel else ""
+        copy_btn = (
+            '<button class="btn ghost" type="button" '
+            "onclick=\"navigator.clipboard.writeText(document.getElementById('raw-md').value)"
+            ".then(() => this.textContent = 'Copied')\">Copy markdown</button>"
+        )
         body = (
             f"<div class='toolbar'><a class='btn' href='/ui/edit?path={quote(rel)}'>Edit</a>"
-            f"<a class='btn ghost' href='/ui'>Back</a></div>"
+            f"<a class='btn ghost' href='/ui'>Back</a>{copy_btn}</div>"
             f"<article>{rendered}</article>"
+            f'<textarea id="raw-md" hidden>{html.escape(raw)}</textarea>'
         )
         return _page(name, body, login=login, crumb=crumb)
 
