@@ -45,12 +45,21 @@ Une entrée peut concerner plusieurs sujets : liste une opération par page long
 terme touchée (integrate pour une page existante, promote pour une nouvelle), et
 un item par chose datée. Par exemple « vu Maryse, parlé de Fractaquin » touche la
 page de Maryse et celle du projet Fractaquin. Si rien n'est assez mûr, laisse
-l'entrée en court terme (listes vides). Pour temporal : type
+l'entrée en court terme (listes vides). Pour les items temporels : type
 (todo/reminder/event/souvenir) et
 "due" = la date jusqu'à laquelle l'item reste actif (date de fin pour un séjour
 borné). Ne sur-fusionne pas : si une unité contient plusieurs choses datées
 distinctes (par ex. un événement et la tâche de préparation associée), produis un
-item temporal par chose, avec sa propre échéance. Tu ne supprimes jamais.
+item temporel par chose, avec sa propre échéance.
+
+Sépare le fait durable de son emballage daté. Un événement daté mentionne souvent
+un fait qui, lui, est durable : une personne, une relation, un lieu. « Voyage à
+Venise avec Maud, ma copine » contient deux choses : le voyage (daté, borné ->
+un item temporel) ET le fait que Maud est la copine de Florent (durable -> une
+page long terme). Dans ce cas, produis À LA FOIS l'item temporel pour la partie
+datée ET une page (promote ou integrate) pour la partie durable. Une personne
+récurrente mérite sa page même si elle n'apparaît que dans des événements. Tu ne
+supprimes jamais.
 """
 
 WRITE_DEFAULT = """# Prompt: write (étape 3)
