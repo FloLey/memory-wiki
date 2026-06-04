@@ -166,7 +166,7 @@ article blockquote { border-left: 3px solid var(--line); margin: 1rem 0; padding
 form { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
        box-shadow: var(--shadow); padding: 1.25rem; }
 label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .3rem; }
-input[type=text], textarea {
+input[type=text], textarea, select {
   width: 100%; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .9rem;
@@ -585,7 +585,9 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        from wiki_server.dream import DREAM_POLICY, ensure_policy
+        from wiki_server.dream import (
+            AVAILABLE_MODELS, DREAM_POLICY, STAGES, effective_models, ensure_policy,
+        )
         from wiki_server.prompts import PROMPT_FILES, ensure_prompt
 
         # Seed defaults if absent, so they are always viewable/editable.
@@ -609,10 +611,61 @@ def register_ui(
                 f'<a class="edit" href="/ui/edit?path={quote(rel)}">edit</a>'
                 f'<div class="muted">{html.escape(desc)}</div></li>'
             )
+        # Per-stage model picker. Cheaper models on triage/decide cut most of the
+        # nightly cost; write benefits most from a stronger model.
+        effective = effective_models()
+        stage_help = {
+            "triage": "Etape 1 (1 appel par nuit).",
+            "decide": "Etape 2 (1 appel par unite).",
+            "write": "Etape 3 (1 appel par page ecrite).",
+        }
+        selects = []
+        for stage in STAGES:
+            current = effective.get(stage, "")
+            options = []
+            known = any(mid == current for mid, _ in AVAILABLE_MODELS)
+            if current and not known:
+                options.append(
+                    f'<option value="{html.escape(current)}" selected>'
+                    f'{html.escape(current)} (actuel)</option>'
+                )
+            for mid, label in AVAILABLE_MODELS:
+                sel = " selected" if mid == current else ""
+                options.append(f'<option value="{html.escape(mid)}"{sel}>{html.escape(label)}</option>')
+            selects.append(
+                f'<div class="field"><label for="m-{stage}"><strong>{stage}</strong> '
+                f'<span class="muted">{stage_help[stage]}</span></label>'
+                f'<select id="m-{stage}" name="{stage}">{"".join(options)}</select></div>'
+            )
+        models_form = (
+            '<section class="card"><h2>Modeles par etape</h2>'
+            "<p class='muted'>Le modele choisi ici l'emporte sur les variables "
+            "d'environnement. Passer triage et decide sur un modele moins cher reduit "
+            "fortement le cout par nuit.</p>"
+            '<form method="post" action="/ui/prompts/models">'
+            f'<input type="hidden" name="csrf" value="{csrf_token(login)}">'
+            f'{"".join(selects)}'
+            '<button class="btn" type="submit">Enregistrer les modeles</button>'
+            '</form></section>'
+        )
         body = (
             "<p class='muted'>La politique et les trois prompts du daemon sont editables. "
             "Le schema de sortie JSON est ajoute par le code, donc editer les consignes ne "
             "casse jamais le contrat machine.</p>"
             f"<section class='card'><ul class='filelist'>{''.join(rows)}</ul></section>"
+            f"{models_form}"
         )
         return _page("Prompts", body, login=login)
+
+    @mcp.custom_route("/ui/prompts/models", methods=["POST"])
+    async def ui_prompts_models(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return PlainTextResponse("Unauthorized.", status_code=401)
+        form = await request.form()
+        if not csrf_ok(login, form.get("csrf")):
+            return PlainTextResponse("Bad CSRF token.", status_code=403)
+        from wiki_server.dream import STAGES, set_models
+
+        set_models({s: form.get(s) for s in STAGES})
+        return RedirectResponse("/ui/prompts", status_code=303)

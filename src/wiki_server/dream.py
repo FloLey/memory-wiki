@@ -33,7 +33,17 @@ _dream_lock = threading.Lock()
 DREAM_POLICY = "DREAM.md"
 DREAM_REPORTS_DIR = "dream_reports"
 USAGE_FILE = "dream_reports/usage.json"
+MODELS_FILE = "dream_models.json"
 DEFAULT_MODEL = "claude-opus-4-8"
+STAGES = ("triage", "decide", "write")
+# Models offered in the UI, cheapest-impacting first. Label carries the list
+# price (per 1M tokens, in/out) so the cost trade-off is visible when choosing.
+AVAILABLE_MODELS = [
+    ("claude-haiku-4-5-20251001", "Haiku 4.5 : rapide, le moins cher (1 / 5 $/M)"),
+    ("claude-sonnet-4-6", "Sonnet 4.6 : bon compromis (3 / 15 $/M)"),
+    ("claude-opus-4-8", "Opus 4.8 : le plus capable, le plus cher (5 / 25 $/M)"),
+]
+_MODEL_IDS = {m for m, _ in AVAILABLE_MODELS}
 _CATEGORIES = ["self", "entities", "projects", "concepts", "sources"]
 _MAX_TOKENS = {"triage": 2048, "decide": 2048, "write": 8192}
 
@@ -106,7 +116,44 @@ def _read_stm_entries() -> list[tuple[str, str]]:
 # Model calls and cost
 # ---------------------------------------------------------------------------
 
+def read_models() -> dict[str, str]:
+    """Per-stage model overrides chosen in the UI, stored in the wiki. Only
+    valid {stage: known-model} pairs are returned; anything else is ignored."""
+    path = resolve_under_root(MODELS_FILE)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {s: data[s] for s in STAGES
+            if isinstance(data.get(s), str) and data[s] in _MODEL_IDS}
+
+
+def set_models(mapping: dict[str, str]) -> dict[str, str]:
+    """Persist the per-stage model choices, keeping only valid pairs, and return
+    what was stored. Committed like any other wiki change."""
+    from wiki_server.store import write_file
+
+    chosen = {s: mapping[s] for s in STAGES
+              if isinstance(mapping.get(s), str) and mapping[s] in _MODEL_IDS}
+    write_file(MODELS_FILE, json.dumps(chosen, indent=2) + "\n",
+               "manual: set dream models")
+    return chosen
+
+
+def effective_models() -> dict[str, str]:
+    """The model that will actually run for each stage (UI choice first)."""
+    return {s: _model_for(s) for s in STAGES}
+
+
 def _model_for(stage: str) -> str:
+    # UI choice (wiki file) wins, then env overrides, then the default.
+    chosen = read_models().get(stage)
+    if chosen:
+        return chosen
     return (os.environ.get(f"WIKI_DREAM_MODEL_{stage.upper()}")
             or os.environ.get("WIKI_DREAM_MODEL") or DEFAULT_MODEL)
 
