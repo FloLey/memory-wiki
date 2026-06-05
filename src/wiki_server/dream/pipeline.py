@@ -153,6 +153,9 @@ def _dry_run(when: datetime.datetime, day: str) -> tuple[str, str]:
         body = _format_decisions(_decisions(usage, policy, stm_entries, notes))
     if notes:
         body += "\n\n---\n\n" + "\n".join(f"- {n}" for n in notes)
+    cost_lines = usage.cost_lines()
+    if cost_lines:
+        body += "\n\n## Coût par étape\n\n" + "\n".join(f"- {c}" for c in cost_lines)
 
     report = f"# Dream dry-run, {day}\n\n{body}\n"
     rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
@@ -226,7 +229,6 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
             u_pages.add(page)
             if isinstance(written.get("description"), str) and written["description"].strip():
                 u_desc[page] = written["description"].strip()
-            u_notes.append(f"Page {page} ({op.get('action', 'write')}).")
 
         for t in _as_list(d.get("temporal")):
             if not isinstance(t, dict):
@@ -250,7 +252,6 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
             u_temporal.add(stem)
             rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)
             u_writes[rel] = file_content
-            u_notes.append(f"Temporal {rel}.")
 
         produced = bool(u_pages or u_temporal)
         # Apply every successful output, whatever else in the unit failed.
@@ -285,7 +286,26 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
     if expirations:
         notes.append(f"{len(expirations)} item(s) temporal expiré(s).")
 
-    report = f"# Dream, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    # Deduped summary of what landed (one line per unique page / item), prefixed
+    # by the stage 1-2 plan so the execute report also shows the reasoning.
+    applied: list[str] = []
+    if page_paths:
+        applied.append(f"{len(page_paths)} page(s) écrite(s) : " + ", ".join(sorted(page_paths)))
+    temporal_made = sorted(f"temporal/{s}.md" for s in temporal_taken)
+    if temporal_made:
+        applied.append(f"{len(temporal_made)} item(s) temporel(s) : " + ", ".join(temporal_made))
+    remaining = sorted({_stm_stem(name) for name, _ in stm_entries} - consumed)
+    if remaining:
+        applied.append(f"{len(remaining)} entrée(s) restée(s) en court terme : " + ", ".join(remaining))
+    applied.extend(notes)
+    plan = _format_decisions(pairs) if pairs else "Aucune décision."
+    cost_lines = usage.cost_lines()
+    cost = ("## Coût par étape\n\n" + "\n".join(f"- {c}" for c in cost_lines) + "\n\n") if cost_lines else ""
+    report = (
+        f"# Dream, {day}\n\n## Plan (étapes 1-2)\n\n{plan}\n\n"
+        f"## Appliqué (étape 3)\n\n" + "\n".join(f"- {n}" for n in applied) + "\n\n"
+        + cost
+    )
     rel = f"{DREAM_REPORTS_DIR}/{day}.md"
     writes[rel] = report
     entry = usage.entry(when)

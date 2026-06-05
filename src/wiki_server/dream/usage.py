@@ -30,6 +30,16 @@ def usage_summary() -> dict:
     entries = read_usage()
     total = sum(float(e.get("cost", 0)) for e in entries)
     runs = len(entries)
+    by_stage: dict[str, dict] = {}
+    for e in entries:
+        for stage, v in (e.get("by_stage") or {}).items():
+            agg = by_stage.setdefault(
+                stage, {"input_tokens": 0, "output_tokens": 0, "cost": 0.0, "models": set()})
+            agg["input_tokens"] += int(v.get("input_tokens", 0))
+            agg["output_tokens"] += int(v.get("output_tokens", 0))
+            agg["cost"] += float(v.get("cost", 0))
+            if v.get("model"):
+                agg["models"].add(v["model"])
     return {
         "runs": runs,
         "total_cost": total,
@@ -37,4 +47,5 @@ def usage_summary() -> dict:
         "avg_cost": total / runs if runs else 0.0,
         "input_tokens": sum(int(e.get("input_tokens", 0)) for e in entries),
         "output_tokens": sum(int(e.get("output_tokens", 0)) for e in entries),
+        "by_stage": by_stage,
     }

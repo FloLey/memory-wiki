@@ -7,7 +7,7 @@ the package root re-exports only the public surface.
 import datetime
 
 from wiki_server import dream
-from wiki_server.dream import index, migration, models, pipeline, runner
+from wiki_server.dream import index, migration, models, pipeline, runner, usage
 
 
 def _now() -> datetime.datetime:
@@ -45,6 +45,39 @@ def test_render_index_groups_known_then_legacy():
     assert "## people" in out and "people/maryse.md" in out and "soeur" in out
     # Known categories come first, the leftover legacy folder is appended.
     assert out.index("## people") < out.index("## entities")
+
+
+# --- per-stage cost -------------------------------------------------------
+
+def test_usage_tracks_cost_per_stage():
+    u = models._Usage()
+    u.add("claude-haiku-4-5-20251001", 1_000_000, 0, "triage")  # 1$ in
+    u.add("claude-opus-4-8", 0, 1_000_000, "write")             # 25$ out
+    e = u.entry(datetime.datetime(2026, 6, 4))
+    assert e["by_stage"]["triage"]["cost"] == 1.0
+    assert e["by_stage"]["write"]["cost"] == 25.0
+    assert e["cost"] == 26.0
+
+
+def test_cost_lines_shows_model_and_price():
+    u = models._Usage()
+    u.add("claude-haiku-4-5-20251001", 1_000_000, 0, "triage")
+    lines = u.cost_lines()
+    assert len(lines) == 1
+    assert "triage" in lines[0] and "haiku" in lines[0] and "$1.00" in lines[0]
+
+
+def test_usage_summary_aggregates_stages(wiki, write):
+    import json
+    write("dream_reports/usage.json", json.dumps([
+        {"cost": 2.0, "by_stage": {"triage": {"input_tokens": 1, "output_tokens": 0, "cost": 1.0},
+                                   "decide": {"input_tokens": 0, "output_tokens": 2, "cost": 1.0}}},
+        {"cost": 1.0, "by_stage": {"triage": {"input_tokens": 3, "output_tokens": 0, "cost": 1.0}}},
+    ]))
+    s = usage.usage_summary()
+    assert s["by_stage"]["triage"]["cost"] == 2.0
+    assert s["by_stage"]["triage"]["input_tokens"] == 4
+    assert s["by_stage"]["decide"]["cost"] == 1.0
 
 
 # --- model selection ------------------------------------------------------
@@ -89,9 +122,13 @@ def test_execute_cumulative_merge(wiki, write, monkeypatch):
     # The write stage merges onto whatever it receives as current content.
     monkeypatch.setattr(pipeline, "_write_page",
                         lambda u, p, op, current="": {"content": (current or "# p\n") + f"\n- {op['change']}", "description": "d"})
-    pipeline._execute(_now(), "2026-06-04")
+    _, report = pipeline._execute(_now(), "2026-06-04")
     page = (wiki / "long_term/people/maryse.md").read_text()
     assert "soeur" in page and "mere" in page  # neither contribution overwritten
+    # Report has the plan and a deduped applied summary: one page line, listed once.
+    assert "## Plan" in report and "## Appliqué" in report
+    assert report.count("long_term/people/maryse.md : touchée par 2") == 1
+    assert "1 page(s) écrite(s) : long_term/people/maryse.md" in report
 
 
 def test_execute_atomic_keeps_stm_on_failure(wiki, write, monkeypatch):

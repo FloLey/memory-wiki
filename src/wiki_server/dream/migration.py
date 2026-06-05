@@ -54,7 +54,7 @@ def _classify_entities(usage: _Usage, items: list[tuple[str, str]]) -> dict[str,
         "Renvoie UNIQUEMENT un objet JSON, sans texte autour, de la forme "
         '{"<nom>": "people|places|organizations"}.\n\n' + listing
     )
-    data = _parse_json(_call_model(usage, _model_for("triage"), prompt, 1024) or "") or {}
+    data = _parse_json(_call_model(usage, _model_for("triage"), prompt, 1024, "migration") or "") or {}
     return {k: v for k, v in data.items()
             if isinstance(k, str) and isinstance(v, str) and v in _MIGRATION_CATEGORIES}
 

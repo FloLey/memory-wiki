@@ -26,7 +26,7 @@ AVAILABLE_MODELS = [
     ("claude-opus-4-8", "Opus 4.8 : le plus capable, le plus cher (5 / 25 $/M)"),
 ]
 _MODEL_IDS = {m for m, _ in AVAILABLE_MODELS}
-_MAX_TOKENS = {"triage": 2048, "decide": 2048, "write": 8192}
+_MAX_TOKENS = {"triage": 4096, "decide": 4096, "write": 8192}
 
 # Anthropic list prices per 1M tokens (USD), by model tier (2026). Unknown /
 # self-hosted models price at 0.
@@ -97,12 +97,35 @@ class _Usage:
         self.out_tok = 0
         self.cost = 0.0
         self.models: set[str] = set()
+        self.stages: dict[str, dict] = {}
 
-    def add(self, model: str, in_tok: int, out_tok: int) -> None:
+    def add(self, model: str, in_tok: int, out_tok: int, stage: str = "?") -> None:
+        cost = _estimate_cost(model, in_tok, out_tok)
         self.in_tok += in_tok
         self.out_tok += out_tok
-        self.cost += _estimate_cost(model, in_tok, out_tok)
+        self.cost += cost
         self.models.add(model)
+        s = self.stages.setdefault(
+            stage, {"input_tokens": 0, "output_tokens": 0, "cost": 0.0, "models": set()})
+        s["input_tokens"] += in_tok
+        s["output_tokens"] += out_tok
+        s["cost"] += cost
+        s["models"].add(model)
+
+    def _stage_model(self, stage: str) -> str:
+        return ", ".join(sorted(self.stages[stage]["models"])) or DEFAULT_MODEL
+
+    def cost_lines(self) -> list[str]:
+        """One human line per stage: model used, cost, tokens. Ordered."""
+        known = ("triage", "decide", "write")
+        order = [s for s in known if s in self.stages]
+        order += [s for s in sorted(self.stages) if s not in known]
+        lines = []
+        for s in order:
+            v = self.stages[s]
+            lines.append(f"{s} : {self._stage_model(s)} : ${v['cost']:.4f} "
+                         f"({v['input_tokens']:,} in / {v['output_tokens']:,} out)")
+        return lines
 
     def entry(self, when: datetime.datetime) -> dict | None:
         if not (self.in_tok or self.out_tok):
@@ -113,6 +136,11 @@ class _Usage:
             "input_tokens": self.in_tok,
             "output_tokens": self.out_tok,
             "cost": round(self.cost, 6),
+            "by_stage": {
+                k: {"input_tokens": v["input_tokens"], "output_tokens": v["output_tokens"],
+                    "cost": round(v["cost"], 6), "model": self._stage_model(k)}
+                for k, v in self.stages.items()
+            },
         }
 
 
@@ -142,9 +170,9 @@ def _parse_json(text: str) -> dict | None:
         return None
 
 
-def _call_model(usage: _Usage, model: str, prompt: str, max_tokens: int) -> str | None:
+def _call_model(usage: _Usage, model: str, prompt: str, max_tokens: int, stage: str = "?") -> str | None:
     """Call the model once and return its text. Never raises: any failure
-    (import, client init, API) returns None. Records token usage."""
+    (import, client init, API) returns None. Records token usage under ``stage``."""
     try:
         import anthropic
 
@@ -156,7 +184,7 @@ def _call_model(usage: _Usage, model: str, prompt: str, max_tokens: int) -> str 
         )
         text = "".join(getattr(b, "text", "") for b in message.content if getattr(b, "type", "") == "text")
         u = getattr(message, "usage", None)
-        usage.add(model, getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0)
+        usage.add(model, getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0, stage)
         return text
     except Exception:
         return None
@@ -166,5 +194,5 @@ def _stage(usage: _Usage, stage: str, context: str) -> dict | None:
     """Run one pipeline stage: build the prompt, call the model, parse JSON.
     Returns None on any failure."""
     text = _call_model(usage, _model_for(stage), prompts.build(stage, context),
-                       _MAX_TOKENS.get(stage, 4096))
+                       _MAX_TOKENS.get(stage, 4096), stage)
     return _parse_json(text) if text is not None else None

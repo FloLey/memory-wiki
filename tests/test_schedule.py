@@ -7,17 +7,17 @@ from wiki_server.dream import schedule
 
 def test_default_schedule_is_off(wiki):
     s = schedule.read_schedule()
-    assert s == {"mode": "off", "hour": 3, "tz": "Europe/Brussels"}
+    assert s == {"mode": "off", "hour": 3, "tz": "Europe/Brussels", "min_entries": 3}
 
 
 def test_set_schedule_validates(wiki):
-    assert schedule.set_schedule("execute", 5, "Europe/Paris")["mode"] == "execute"
+    assert schedule.set_schedule("execute", 5, "Europe/Paris", 4)["mode"] == "execute"
     s = schedule.read_schedule()
-    assert s["mode"] == "execute" and s["hour"] == 5 and s["tz"] == "Europe/Paris"
-    # invalid mode, hour and timezone are ignored, keeping the previous values
-    schedule.set_schedule("bogus", 99, "Invalid/Zone")
+    assert s["mode"] == "execute" and s["hour"] == 5 and s["tz"] == "Europe/Paris" and s["min_entries"] == 4
+    # invalid mode, hour, timezone and min_entries are ignored, keeping previous values
+    schedule.set_schedule("bogus", 99, "Invalid/Zone", 0)
     s = schedule.read_schedule()
-    assert s["mode"] == "execute" and s["hour"] == 5 and s["tz"] == "Europe/Paris"
+    assert s["mode"] == "execute" and s["hour"] == 5 and s["tz"] == "Europe/Paris" and s["min_entries"] == 4
 
 
 def _at(hour: int) -> datetime.datetime:
@@ -25,20 +25,32 @@ def _at(hour: int) -> datetime.datetime:
 
 
 def test_due_off_never_runs():
-    assert schedule._due_action(_at(23), 3, "off", lambda d, m: False) is None
+    assert schedule._due_action(_at(23), 3, "off", lambda d, m: False, 99, 3) is None
 
 
 def test_due_waits_until_hour():
-    assert schedule._due_action(_at(2), 3, "execute", lambda d, m: False) is None
-    assert schedule._due_action(_at(3), 3, "execute", lambda d, m: False) == "execute"
+    assert schedule._due_action(_at(2), 3, "execute", lambda d, m: False, 99, 3) is None
+    assert schedule._due_action(_at(3), 3, "execute", lambda d, m: False, 99, 3) == "execute"
 
 
 def test_due_skips_if_report_already_done():
-    assert schedule._due_action(_at(4), 3, "execute", lambda d, m: True) is None
+    assert schedule._due_action(_at(4), 3, "execute", lambda d, m: True, 99, 3) is None
 
 
 def test_due_dry_run_mode():
-    assert schedule._due_action(_at(4), 3, "dry-run", lambda d, m: False) == "dry-run"
+    assert schedule._due_action(_at(4), 3, "dry-run", lambda d, m: False, 99, 3) == "dry-run"
+
+
+def test_due_skips_below_min_entries():
+    assert schedule._due_action(_at(4), 3, "execute", lambda d, m: False, 2, 3) is None
+    assert schedule._due_action(_at(4), 3, "execute", lambda d, m: False, 3, 3) == "execute"
+
+
+def test_stm_count(wiki, write):
+    assert schedule._stm_count() == 0
+    write("short_term/entries/a.md", "x")
+    write("short_term/entries/b.md", "y")
+    assert schedule._stm_count() == 2
 
 
 def test_report_done_checks_the_right_file(wiki, write):

@@ -350,6 +350,20 @@ def register_ui(
             '<button class="btn ghost" type="submit">Reset cost</button>'
             '</form>'
         )
+        stages = u.get("by_stage") or {}
+        stage_order = [s for s in ("triage", "decide", "write") if s in stages]
+        stage_order += [s for s in sorted(stages) if s not in ("triage", "decide", "write")]
+        stage_rows = "".join(
+            f'<tr><th>{html.escape(s)}</th>'
+            f'<td>{html.escape(", ".join(sorted(stages[s].get("models", []))) or "?")} : '
+            f'${stages[s]["cost"]:.4f} '
+            f'({stages[s]["input_tokens"]:,} in / {stages[s]["output_tokens"]:,} out)</td></tr>'
+            for s in stage_order
+        )
+        stage_table = (
+            f'<table><tbody>{stage_rows}</tbody></table>' if stage_rows
+            else "<p class='muted'>Pas encore de detail par etape.</p>"
+        )
         cost_html = (
             '<section class="card"><h2>Cost (estimated)</h2>'
             '<table><tbody>'
@@ -358,6 +372,8 @@ def register_ui(
             f'<tr><th>Per night (avg)</th><td>${u["avg_cost"]:.4f}</td></tr>'
             f'<tr><th>Tokens</th><td>{u["input_tokens"]:,} in / {u["output_tokens"]:,} out</td></tr>'
             '</tbody></table>'
+            '<h3>Par etape (cumule)</h3>'
+            f'{stage_table}'
             '<p class="muted">Token counts are exact; cost is estimated from '
             'Anthropic list prices for the model (per 1M tokens).</p>'
             f'{reset_cost_form}'
@@ -385,13 +401,16 @@ def register_ui(
             '<section class="card"><h2>Nightly dream (automatique)</h2>'
             "<p class='muted'>off : rien. dry-run : propose chaque nuit (tu valides au matin). "
             "execute : applique chaque nuit. Une seule fois par jour, apres l'heure choisie "
-            f"({html.escape(sched['tz'])}).</p>"
+            f"({html.escape(sched['tz'])}), et seulement si la memoire court terme a assez "
+            "d'entrees.</p>"
             '<form method="post" action="/ui/dream/schedule">'
             f'<input type="hidden" name="csrf" value="{token}">'
             f'<div class="field"><label for="s-mode">Mode</label>'
             f'<select id="s-mode" name="mode">{mode_opts}</select></div>'
             f'<div class="field"><label for="s-hour">Heure locale (0-23)</label>'
             f'<input type="number" id="s-hour" name="hour" min="0" max="23" value="{sched["hour"]}"></div>'
+            f'<div class="field"><label for="s-min">Minimum d\'entrees court terme</label>'
+            f'<input type="number" id="s-min" name="min_entries" min="1" value="{sched["min_entries"]}"></div>'
             '<button class="btn" type="submit">Enregistrer la planification</button>'
             '</form></section>'
         )
@@ -443,7 +462,7 @@ def register_ui(
             return err
         from wiki_server.dream import set_schedule
 
-        set_schedule(form.get("mode"), form.get("hour"))
+        set_schedule(form.get("mode"), form.get("hour"), min_entries=form.get("min_entries"))
         return RedirectResponse("/ui/dream", status_code=303)
 
     # ---- prompts (editable policy + stage prompts) ----
