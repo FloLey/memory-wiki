@@ -73,3 +73,18 @@ def _read(rel: str) -> str:
         return path.read_text(encoding="utf-8") if path.is_file() else ""
     except (OSError, UnicodeDecodeError):
         return ""
+
+
+def _stamp(when) -> str:
+    """Format a run time for a report heading, in the scheduled local zone
+    (falls back to a UTC-labelled stamp). e.g. '2026-06-05 03:00'."""
+    if when is None or not hasattr(when, "strftime"):
+        return "unknown time"
+    try:
+        from zoneinfo import ZoneInfo
+
+        from .schedule import read_schedule
+
+        return when.astimezone(ZoneInfo(read_schedule()["tz"])).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return when.strftime("%Y-%m-%d %H:%M UTC")

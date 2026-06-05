@@ -12,7 +12,7 @@ import json
 from wiki_server.paths import resolve_under_root, wiki_root
 from wiki_server.store import apply_changes, write_files
 
-from .config import DREAM_REPORTS_DIR, USAGE_FILE, _read
+from .config import DREAM_REPORTS_DIR, USAGE_FILE, _read, _stamp
 from .index import _index_descriptions, _render_index
 from .models import _Usage, _call_model, _model_for, _parse_json
 from .runner import _guarded
@@ -70,7 +70,7 @@ def _migrate(when: datetime.datetime, day: str) -> tuple[str, str]:
     ent = resolve_under_root("long_term/entities")
     files = sorted(ent.glob("*.md")) if ent.is_dir() else []
     if not files:
-        report = f"# Migration entities, {day}\n\nAucune page entities à migrer.\n"
+        report = f"# Migration entities, {_stamp(when)}\n\nAucune page entities à migrer.\n"
         write_files({rel_report: report}, f"manual: migration report {day}")
         return rel_report, report
 
@@ -101,7 +101,7 @@ def _migrate(when: datetime.datetime, day: str) -> tuple[str, str]:
     writes["long_term/index.md"] = _render_index(final_paths, descs)
 
     notes = [f"{old} -> {new}" for old, new in sorted(moves.items())]
-    report = f"# Migration entities, {day}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    report = f"# Migration entities, {_stamp(when)}\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
     writes[rel_report] = report
     entry = usage.entry(when)
     if entry:

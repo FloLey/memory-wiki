@@ -131,6 +131,27 @@ def test_execute_cumulative_merge(wiki, write, monkeypatch):
     assert "1 page(s) écrite(s) : long_term/people/maryse.md" in report
 
 
+def test_execute_writes_each_page_once(wiki, write, monkeypatch):
+    _stm(write, "a", "b", "c")
+    monkeypatch.setattr(pipeline, "_decisions", lambda u, p, se, no: [
+        {"unit": {"stm": [f"{n}.md"]}, "decision": {"pages": [
+            {"action": "promote", "page": "long_term/self/identity.md", "change": n}]}}
+        for n in ("a", "b", "c")
+    ])
+    calls = {"n": 0}
+
+    def counting_write(u, p, op, current=""):
+        calls["n"] += 1
+        return {"content": (current or "# id\n") + op["change"], "description": "d"}
+
+    monkeypatch.setattr(pipeline, "_write_page", counting_write)
+    pipeline._execute(_now(), "2026-06-04")
+    # Three units touch the same page, but it is written only once.
+    assert calls["n"] == 1
+    page = (wiki / "long_term/self/identity.md").read_text()
+    assert "a" in page and "b" in page and "c" in page
+
+
 def test_execute_atomic_keeps_stm_on_failure(wiki, write, monkeypatch):
     _stm(write, "a")
     monkeypatch.setattr(pipeline, "_decisions", lambda u, p, se, no: [

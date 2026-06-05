@@ -15,7 +15,7 @@ from wiki_server import temporal
 from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
 from wiki_server.store import apply_changes, stm_index_content, write_files
 
-from .config import DREAM_REPORTS_DIR, USAGE_FILE, _read, ensure_policy
+from .config import DREAM_REPORTS_DIR, USAGE_FILE, _read, _stamp, ensure_policy
 from .index import _regenerate_index
 from .models import _Usage, _stage
 from .runner import _guarded
@@ -157,7 +157,7 @@ def _dry_run(when: datetime.datetime, day: str) -> tuple[str, str]:
     if cost_lines:
         body += "\n\n## Coût par étape\n\n" + "\n".join(f"- {c}" for c in cost_lines)
 
-    report = f"# Dream dry-run, {day}\n\n{body}\n"
+    report = f"# Dream dry-run, {_stamp(when)}\n\n{body}\n"
     rel = f"{DREAM_REPORTS_DIR}/{day}-dryrun.md"
     files = {rel: report}
     entry = usage.entry(when)
@@ -189,17 +189,18 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
     consumed: set[str] = set()
     temporal_taken: set[str] = set()
 
+    # Pass 1: per unit, collect its valid page targets and create its temporal
+    # items (no model call). Page changes are grouped by path so a page touched by
+    # several units is written ONCE, not once per unit.
+    page_changes: dict[str, list[str]] = {}
+    unit_pages: list[set[str]] = []
+    unit_temporal: list[set[str]] = []
+    unit_failed: list[bool] = []
+
     for pair in pairs:
-        u, d = pair["unit"], pair["decision"]
-        stm_stems = {_stm_stem(n) for n in (u.get("stm") or []) if isinstance(n, str)}
-        # Per-element: every output that succeeds is applied. The short-term
-        # entries are only kept (for the next dream) when something in the unit
-        # failed, so what landed is durable and only the missing part is retried.
-        u_writes: dict[str, str] = {}
-        u_desc: dict[str, str] = {}
+        d = pair["decision"]
         u_pages: set[str] = set()
         u_temporal: set[str] = set()
-        u_notes: list[str] = []
         failed = False
 
         for op in _as_list(d.get("pages")):
@@ -207,28 +208,18 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
                 continue
             page = op.get("page")
             if not (isinstance(page, str) and page.startswith("long_term/") and page.endswith(".md")):
-                u_notes.append(f"Page invalide : {page!r}")
+                notes.append(f"Page invalide : {page!r}")
                 failed = True
                 continue
             try:
                 resolve_under_root(page)
             except WikiPathError:
-                u_notes.append(f"Page interdite : {page!r}")
+                notes.append(f"Page interdite : {page!r}")
                 failed = True
                 continue
-            # Cumulative build: start from what this dream already produced for
-            # this path (an earlier unit, then this unit), else the on-disk page.
-            # So several units that touch the same page merge instead of clobber.
-            current = u_writes.get(page) or writes.get(page) or _read(page)
-            written = _write_page(usage, policy, op, current)
-            if not written:
-                u_notes.append(f"Écriture échouée pour {page}.")
-                failed = True
-                continue
-            u_writes[page] = written["content"]
+            change_val = op.get("change")
+            page_changes.setdefault(page, []).append(str(change_val).strip() if change_val is not None else "")
             u_pages.add(page)
-            if isinstance(written.get("description"), str) and written["description"].strip():
-                u_desc[page] = written["description"].strip()
 
         for t in _as_list(d.get("temporal")):
             if not isinstance(t, dict):
@@ -241,32 +232,58 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
             # A temporal item must expire: require a valid ISO due, else it would
             # sit active forever. Without one it is a durable fact, not temporal.
             if not due:
-                u_notes.append(f"Item temporel sans échéance ignoré : {content[:60]}")
+                notes.append(f"Item temporel sans échéance ignoré : {content[:60]}")
                 continue
             try:
                 datetime.date.fromisoformat(due[:10])
             except ValueError:
-                u_notes.append(f"Item temporel à échéance invalide ignoré : {due!r}")
+                notes.append(f"Item temporel à échéance invalide ignoré : {due!r}")
                 continue
             stem = temporal.item_stem(content, due, None, temporal_taken | u_temporal)
             u_temporal.add(stem)
             rel, file_content = temporal.build_item(stem, str(t.get("type", "todo")), due, content)
-            u_writes[rel] = file_content
+            writes[rel] = file_content
 
-        produced = bool(u_pages or u_temporal)
-        # Apply every successful output, whatever else in the unit failed.
-        writes.update(u_writes)
-        new_desc.update(u_desc)
-        page_paths |= u_pages
         temporal_taken |= u_temporal
-        notes.extend(u_notes)
-        if produced and not failed:
+        unit_pages.append(u_pages)
+        unit_temporal.append(u_temporal)
+        unit_failed.append(failed)
+
+    # Pass 2: one write per unique page, merging every contributing unit's change.
+    page_ok: set[str] = set()
+    for path, changes in page_changes.items():
+        current = _read(path)
+        valid = [c for c in changes if c]
+        merged = valid[0] if len(valid) == 1 else "\n".join(f"- {c}" for c in valid)
+        op = {
+            "action": "integrate" if current else "promote",
+            "page": path,
+            "change": merged,
+        }
+        written = _write_page(usage, policy, op, current)
+        if not written:
+            notes.append(f"Écriture échouée pour {path}.")
+            continue
+        writes[path] = written["content"]
+        page_ok.add(path)
+        if isinstance(written.get("description"), str) and written["description"].strip():
+            new_desc[path] = written["description"].strip()
+    page_paths |= page_ok
+
+    # Consume a unit's short-term entries only if it produced something, nothing
+    # was invalid/forbidden, and every page it touched was written. Otherwise keep
+    # it for the next dream, so the missing part is never lost.
+    for i, pair in enumerate(pairs):
+        u = pair["unit"]
+        stm_stems = {_stm_stem(n) for n in (u.get("stm") or []) if isinstance(n, str)}
+        produced = bool(unit_pages[i] or unit_temporal[i])
+        pages_ok = unit_pages[i] <= page_ok
+        kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
+        if produced and not unit_failed[i] and pages_ok:
             consumed |= stm_stems
-        elif failed:
-            kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
-            notes.append(f"Gardé en court terme (un élément a échoué, voir ci-dessus) : {kept}")
+        elif produced or unit_failed[i]:
+            notes.append(f"Gardé en court terme (un élément a échoué) : {kept}")
         else:
-            kept = ", ".join(n for n in (u.get("stm") or []) if isinstance(n, str))
             notes.append(f"Gardé en court terme : {kept}")
 
     if page_paths or new_desc:
@@ -302,7 +319,7 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
     cost_lines = usage.cost_lines()
     cost = ("## Coût par étape\n\n" + "\n".join(f"- {c}" for c in cost_lines) + "\n\n") if cost_lines else ""
     report = (
-        f"# Dream, {day}\n\n## Plan (étapes 1-2)\n\n{plan}\n\n"
+        f"# Dream, {_stamp(when)}\n\n## Plan (étapes 1-2)\n\n{plan}\n\n"
         f"## Appliqué (étape 3)\n\n" + "\n".join(f"- {n}" for n in applied) + "\n\n"
         + cost
     )

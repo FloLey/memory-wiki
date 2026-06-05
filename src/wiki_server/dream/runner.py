@@ -13,26 +13,28 @@ import traceback
 
 from wiki_server.store import write_files
 
-from .config import DREAM_REPORTS_DIR, _dream_lock
+from .config import DREAM_REPORTS_DIR, _dream_lock, _stamp
 
 
-def _no_key_report(day: str, dry: bool) -> tuple[str, str]:
+def _no_key_report(when: datetime.datetime, dry: bool) -> tuple[str, str]:
+    day = when.date().isoformat()
     body = "ANTHROPIC_API_KEY is not set; cannot run the dream. Add it as a secret."
     suffix = "-dryrun" if dry else ""
     rel = f"{DREAM_REPORTS_DIR}/{day}{suffix}.md"
-    report = f"# Dream {'dry-run' if dry else ''}, {day}\n\n{body}\n"
+    report = f"# Dream {'dry-run' if dry else ''}, {_stamp(when)}\n\n{body}\n"
     write_files({rel: report}, f"dream: report {day}")
     return rel, report
 
 
-def _error_report(day: str, dry: bool) -> tuple[str, str]:
+def _error_report(when: datetime.datetime, dry: bool) -> tuple[str, str]:
     """Capture an unexpected failure into a report instead of crashing the
     request, so the user sees the cause and the dream never returns a raw 500."""
+    day = when.date().isoformat()
     tb = traceback.format_exc()
     suffix = "-dryrun" if dry else ""
     rel = f"{DREAM_REPORTS_DIR}/{day}{suffix}.md"
     report = (
-        f"# Dream {'dry-run' if dry else ''}, {day}\n\n"
+        f"# Dream {'dry-run' if dry else ''}, {_stamp(when)}\n\n"
         f"Le rêve a échoué. Trace technique :\n\n```\n{tb}\n```\n"
     )
     try:
@@ -50,7 +52,7 @@ def _guarded(dry: bool, work) -> tuple[str, str]:
         day = when.date().isoformat()
         try:
             if not os.environ.get("ANTHROPIC_API_KEY"):
-                return _no_key_report(day, dry)
+                return _no_key_report(when, dry)
             return work(when, day)
         except Exception:
-            return _error_report(day, dry)
+            return _error_report(when, dry)
