@@ -1,8 +1,11 @@
-"""Grounding context (prime) and search."""
+"""Grounding context (prime), search and the folder browser."""
 
 import datetime
 
+import pytest
+
 from wiki_server import query
+from wiki_server.paths import WikiPathError
 
 
 def test_build_prime_bundles_self_and_indexes(wiki, write):
@@ -39,3 +42,46 @@ def test_find_pages_by_name(wiki, write):
     write("long_term/people/maryse.md", "x")
     assert query.find_pages_by_name("maryse.md") == ["long_term/people/maryse.md"]
     assert query.find_pages_by_name("identity.md") == []
+
+
+def test_browse_root_hides_machinery(wiki, write):
+    write("long_term/index.md", "x")
+    write("short_term/index.md", "x")
+    write("temporal/a.md", "x")
+    write("DREAM.md", "x")
+    write("dream_reports/r.md", "x")
+    write("dream_models.json", "{}")
+    subdirs, files = query.browse("")
+    names = {n for n, _, _ in subdirs}
+    fnames = {n for n, _ in files}
+    assert {"long_term", "short_term", "temporal"} <= names
+    assert "dream_reports" not in names                 # machinery folder hidden
+    assert "DREAM.md" not in fnames and "dream_models.json" not in fnames
+
+
+def test_browse_drills_into_folder(wiki, write):
+    write("long_term/people/maryse.md", "x")
+    write("long_term/index.md", "x")
+    subdirs, files = query.browse("long_term")
+    assert "people" in {n for n, _, _ in subdirs}
+    assert ("index.md", "long_term/index.md") in files
+
+
+def test_browse_counts_md(wiki, write):
+    write("long_term/people/a.md", "x")
+    write("long_term/people/b.md", "x")
+    subdirs, _ = query.browse("long_term")
+    people = next(s for s in subdirs if s[0] == "people")
+    assert people[2] == 2
+
+
+def test_browse_skips_private(wiki, write):
+    write("long_term/private/secret.md", "x")
+    write("long_term/index.md", "x")
+    subdirs, _ = query.browse("long_term")
+    assert "private" not in {n for n, _, _ in subdirs}
+
+
+def test_browse_rejects_escape(wiki):
+    with pytest.raises(WikiPathError):
+        query.browse("../..")

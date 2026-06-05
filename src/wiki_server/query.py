@@ -10,10 +10,48 @@ from __future__ import annotations
 
 import datetime
 
-from wiki_server.paths import resolve_under_root, wiki_root
+from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
 
 # Self pages, in the order Claude should read them to ground itself.
 _SELF_ORDER = ["identity.md", "style.md", "voices.md", "familiars.md"]
+
+# Machinery hidden from the folder browser at the root (it has its own UI tabs).
+_HIDDEN_AT_ROOT = {"dream_reports", "prompts", "DREAM.md",
+                   "dream_models.json", "dream_schedule.json"}
+
+
+def browse(rel: str):
+    """List one directory level under the wiki root. Returns (subdirs, files):
+    subdirs is [(name, relpath, md_count)], files is [(name, relpath)]. Skips
+    dotfiles, the machinery at the root, and anything the path guard forbids (the
+    private area). Raises WikiPathError if ``rel`` itself escapes the root.
+
+    The per-folder page count reuses a single ``list_pages`` scan and counts by
+    prefix in memory, so a listing is one disk scan, not one per subfolder."""
+    base = resolve_under_root(rel) if rel else wiki_root()
+    subdirs: list[tuple[str, str, int]] = []
+    files: list[tuple[str, str]] = []
+    if not base.is_dir():
+        return subdirs, files
+    all_pages = list_pages()
+    for child in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+        name = child.name
+        if name.startswith("."):
+            continue
+        if not rel and name in _HIDDEN_AT_ROOT:
+            continue
+        child_rel = f"{rel}/{name}" if rel else name
+        try:
+            resolve_under_root(child_rel)
+        except WikiPathError:
+            continue
+        if child.is_dir():
+            prefix = f"{child_rel}/"
+            count = sum(1 for p in all_pages if p.startswith(prefix))
+            subdirs.append((name, child_rel, count))
+        elif name.endswith(".md"):
+            files.append((name, child_rel))
+    return subdirs, files
 
 
 def _safe_read(path) -> str:

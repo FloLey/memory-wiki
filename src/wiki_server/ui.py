@@ -21,7 +21,8 @@ from markdown_it import MarkdownIt
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
-from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
+from wiki_server.paths import WikiPathError, resolve_under_root
+from wiki_server.query import browse
 from wiki_server.store import delete_file, write_file
 from wiki_server.ui_assets import _page, _sign, _verify
 
@@ -29,29 +30,7 @@ SESSION_COOKIE = "wiki_ui_session"
 STATE_COOKIE = "wiki_ui_state"
 SESSION_TTL = 7 * 24 * 3600
 
-_ROOT_GROUP = "_root"
-_CATEGORY_LABELS = {
-    "long_term": "Long-term memory",
-    "short_term": "Short-term memory",
-    _ROOT_GROUP: "Other",
-}
-
 _md = MarkdownIt("commonmark").enable("table")
-
-
-# ----------------------------------------------------------------------------
-# Wiki file helpers
-# ----------------------------------------------------------------------------
-
-def _list_md_files() -> list[str]:
-    root = wiki_root()
-    out = []
-    for p in sorted(root.rglob("*.md")):
-        parts = p.relative_to(root).parts
-        if ".git" in parts or ("long_term" in parts and "private" in parts):
-            continue
-        out.append(p.relative_to(root).as_posix())
-    return out
 
 
 def register_ui(
@@ -182,36 +161,39 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        # The overview shows the memory itself. Machinery (policy, prompts, dream
-        # reports) has its own tabs (Prompts, Dreams), so hide it here.
-        hidden_top = {"dream_reports", "prompts"}
-        hidden_files = {"DREAM.md"}
-        files = [
-            f for f in _list_md_files()
-            if f.split("/", 1)[0] not in hidden_top and f not in hidden_files
-        ]
-        if not files:
-            body = "<div class='empty'>No pages yet. Use <strong>New page</strong> to add one.</div>"
-            return _page("Overview", body, login=login)
-        groups: dict[str, list[str]] = {}
-        for f in files:
-            top = f.split("/", 1)[0] if "/" in f else _ROOT_GROUP
-            groups.setdefault(top, []).append(f)
-        cards = ""
-        for top in sorted(groups, key=lambda k: (k == _ROOT_GROUP, k)):
-            rows = "".join(
-                f'<li><a class="name" href="/ui/page/{quote(f)}">{html.escape(f)}</a>'
-                f'<a class="edit" href="/ui/edit?path={quote(f)}">edit</a></li>'
-                for f in groups[top]
-            )
-            label = _CATEGORY_LABELS.get(top, top)
-            cards += (
-                f'<section class="card"><h2>{html.escape(label)} '
-                f'<span class="muted">({len(groups[top])})</span></h2>'
-                f'<ul class="filelist">{rows}</ul></section>'
-            )
-        body = f"<p class='muted'>{len(files)} page(s) across your memory.</p>{cards}"
-        return _page("Overview", body, login=login)
+        # Normalize the path: drop empty segments (handles trailing/double slashes).
+        rel = "/".join(s for s in (request.query_params.get("dir") or "").split("/") if s)
+        try:
+            subdirs, files = browse(rel)
+        except WikiPathError:
+            return PlainTextResponse("Forbidden.", status_code=403)
+
+        # Breadcrumb: memory / long_term / people ...
+        crumbs = ['<a href="/ui">memory</a>']
+        acc = ""
+        for seg in rel.split("/") if rel else []:
+            acc = f"{acc}/{seg}" if acc else seg
+            crumbs.append(f'<a href="/ui?dir={quote(acc)}">{html.escape(seg)}</a>')
+        crumb_html = f"<p class='muted crumb'>{' / '.join(crumbs)}</p>"
+
+        dir_rows = "".join(
+            f'<li><a class="name" href="/ui?dir={quote(cr)}">{html.escape(name)}/</a>'
+            f'<span class="muted">{count}</span></li>'
+            for name, cr, count in subdirs
+        )
+        file_rows = "".join(
+            f'<li><a class="name" href="/ui/page/{quote(cr)}">{html.escape(name)}</a>'
+            f'<a class="edit" href="/ui/edit?path={quote(cr)}">edit</a></li>'
+            for name, cr in files
+        )
+        sections = ""
+        if dir_rows:
+            sections += f'<section class="card"><h2>Folders</h2><ul class="filelist">{dir_rows}</ul></section>'
+        if file_rows:
+            sections += f'<section class="card"><h2>Pages</h2><ul class="filelist">{file_rows}</ul></section>'
+        if not sections:
+            sections = "<div class='empty'>Empty folder.</div>"
+        return _page("Overview", crumb_html + sections, login=login)
 
     @mcp.custom_route("/ui/page/{path:path}", methods=["GET"])
     async def ui_view(request: Request) -> Response:
