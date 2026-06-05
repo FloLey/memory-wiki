@@ -152,6 +152,29 @@ def test_execute_writes_each_page_once(wiki, write, monkeypatch):
     assert "a" in page and "b" in page and "c" in page
 
 
+def test_normalize_page_adds_long_term_prefix():
+    assert pipeline._normalize_page("people/maud.md") == "long_term/people/maud.md"
+    assert pipeline._normalize_page("long_term/self/identity.md") == "long_term/self/identity.md"
+    assert pipeline._normalize_page("/projects/x.md") == "long_term/projects/x.md"
+    assert pipeline._normalize_page("/long_term/people/maud.md") == "long_term/people/maud.md"
+    assert pipeline._normalize_page("not a path") is None
+    assert pipeline._normalize_page(None) is None
+
+
+def test_execute_applies_category_relative_path(wiki, write, monkeypatch):
+    _stm(write, "a")
+    monkeypatch.setattr(pipeline, "_decisions", lambda u, p, se, no: [
+        {"unit": {"stm": ["a.md"]}, "decision": {"pages": [
+            {"action": "promote", "page": "people/maud.md", "change": "copine"}]}},
+    ])
+    monkeypatch.setattr(pipeline, "_write_page",
+                        lambda u, p, op, current="": {"content": "# Maud\n", "description": "d"})
+    pipeline._execute(_now(), "2026-06-04")
+    # The prefix-less path is applied under long_term/, not rejected.
+    assert (wiki / "long_term/people/maud.md").exists()
+    assert not (wiki / "short_term/entries/a.md").exists()  # STM consumed (it worked)
+
+
 def test_execute_atomic_keeps_stm_on_failure(wiki, write, monkeypatch):
     _stm(write, "a")
     monkeypatch.setattr(pipeline, "_decisions", lambda u, p, se, no: [

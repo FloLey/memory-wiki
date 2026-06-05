@@ -48,6 +48,21 @@ def _as_list(value) -> list:
     return value if isinstance(value, list) else [value]
 
 
+def _normalize_page(page) -> str | None:
+    """Coerce a decide page path to a ``long_term/<...>.md`` path. The model often
+    emits the category-relative form (``people/maud.md``) instead of the full path;
+    we map it under long_term/ rather than reject it. Returns None if it cannot be
+    a page (not a string, or not a .md path)."""
+    if not isinstance(page, str):
+        return None
+    page = page.strip().strip("'\"").lstrip("/")
+    if not page.endswith(".md"):
+        return None
+    if not page.startswith("long_term/"):
+        page = "long_term/" + page
+    return page
+
+
 def _decisions(usage: _Usage, policy: str, stm_entries: list[tuple[str, str]], notes: list) -> list[dict]:
     """Stage 1 (triage) + stage 2 (decide per unit). Returns [{unit, decision}]."""
     stm_map = {name: body for name, body in stm_entries}
@@ -206,11 +221,12 @@ def _execute(when: datetime.datetime, day: str) -> tuple[str, str]:
         for op in _as_list(d.get("pages")):
             if not isinstance(op, dict):
                 continue
-            page = op.get("page")
-            if not (isinstance(page, str) and page.startswith("long_term/") and page.endswith(".md")):
-                notes.append(f"Page invalide : {page!r}")
+            page = _normalize_page(op.get("page"))
+            if page is None:
+                notes.append(f"Page invalide : {op.get('page')!r}")
                 failed = True
                 continue
+            op["page"] = page  # so the plan section of the report shows the same path
             try:
                 resolve_under_root(page)
             except WikiPathError:
