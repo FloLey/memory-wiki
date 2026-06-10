@@ -23,7 +23,7 @@ from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
 from wiki_server.paths import WikiPathError, resolve_under_root
 from wiki_server.query import browse
-from wiki_server.store import delete_file, write_file
+from wiki_server.store import delete_file, parse_frontmatter, write_file
 from wiki_server.ui_assets import _page, _sign, _verify
 
 SESSION_COOKIE = "wiki_ui_session"
@@ -240,13 +240,40 @@ def register_ui(
             "onclick=\"navigator.clipboard.writeText(document.getElementById('raw-md').value)"
             ".then(() => this.textContent = 'Copied')\">Copy markdown</button>"
         )
+        # On a still-active temporal item, offer "Marquer fait" (especially for an
+        # overdue todo whose deadline passed but which is not done).
+        done_btn = ""
+        if rel.startswith("temporal/") and parse_frontmatter(raw)[0].get("status", "active") == "active":
+            done_btn = (
+                f'<form method="post" action="/ui/temporal/done" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf_token(login)}">'
+                f'<input type="hidden" name="path" value="{html.escape(rel)}">'
+                f'<button class="btn" type="submit">Marquer fait</button></form>'
+            )
         body = (
             f"<div class='toolbar'><a class='btn' href='/ui/edit?path={quote(rel)}'>Edit</a>"
-            f"<a class='btn ghost' href='/ui'>Back</a>{copy_btn}</div>"
+            f"<a class='btn ghost' href='/ui'>Back</a>{copy_btn}{done_btn}</div>"
             f"<article>{rendered}</article>"
             f'<textarea id="raw-md" hidden>{html.escape(raw)}</textarea>'
         )
         return _page(name, body, login=login, crumb=crumb)
+
+    @mcp.custom_route("/ui/temporal/done", methods=["POST"])
+    async def ui_temporal_done(request: Request) -> Response:
+        login, form, err = await require_post(request)
+        if err:
+            return err
+        from wiki_server import temporal
+
+        rel = (form.get("path") or "").strip()
+        if not rel.startswith("temporal/"):
+            return PlainTextResponse("Not a temporal item.", status_code=400)
+        try:
+            if not temporal.mark_done(rel):
+                return PlainTextResponse("Not found.", status_code=404)
+        except WikiPathError:
+            return PlainTextResponse("Forbidden.", status_code=403)
+        return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
 
     # ---- editing ----
     @mcp.custom_route("/ui/edit", methods=["GET"])

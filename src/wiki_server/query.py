@@ -109,27 +109,21 @@ def build_prime() -> str:
         if p.is_file():
             sections.append(f"## {rel}\n\n{_safe_read(p)}")
 
-    # Active temporal items (todos, reminders, events). Also hide anything whose
-    # due (active-until) is already past, even if no dream has expired it yet, so
-    # what Claude sees is only what is still current.
+    # Active temporal items. A past-due event is over (hidden); a past-due todo /
+    # reminder stays, flagged OVERDUE, until it is marked done or long-past.
     from wiki_server import temporal
 
     today = datetime.date.today()
-
-    def _still_current(item: dict) -> bool:
-        due = item["meta"].get("due", "")
-        try:
-            return datetime.date.fromisoformat(str(due)[:10]) >= today
-        except ValueError:
-            return True  # missing or malformed due: cannot date it, keep it
-
-    active = [i for i in temporal.list_items(active_only=True) if _still_current(i)]
-    if active:
-        lines = [
-            f"- [{i['meta'].get('type', 'item')}] {i['body'].splitlines()[0] if i['body'] else ''}"
-            f" (due {i['meta'].get('due', '-')})"
-            for i in active
-        ]
+    lines = []
+    for i in temporal.list_items(active_only=True):
+        show, overdue = temporal.surface_state(i["meta"], today)
+        if not show:
+            continue
+        flag = "EN RETARD " if overdue else ""
+        first = i["body"].splitlines()[0] if i["body"] else ""
+        lines.append(f"- {flag}[{i['meta'].get('type', 'item')}] {first}"
+                     f" (due {i['meta'].get('due', '-')})")
+    if lines:
         sections.append("## temporal (active)\n\n" + "\n".join(lines))
 
     if not sections:

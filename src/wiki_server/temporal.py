@@ -1,12 +1,14 @@
 """Temporal items: dated, transient things (todos, reminders, events) that live
-until a date or until done, then get archived. Every item has a ``due`` date (its
-"active until"); something durable with no expiry is not a temporal item, it
-belongs on a long-term page. They sit in their own area ``temporal/`` next to
-long_term/ and short_term/, so they do not pollute the durable knowledge.
+until a date or until done, then get archived. Every item has a ``due`` date.
+They sit in their own area ``temporal/`` next to long_term/ and short_term/.
 
-Lifecycle: status active -> expired (the ``due`` date, meaning "active until",
-has passed) or done. Nothing is ever deleted. The daemon files dated short-term
-captures here and expires past ones. Files have descriptive names.
+Lifecycle by kind:
+- event: ``due`` is the end; once it passes the event is over -> expired (hidden).
+- todo / reminder (actionable): ``due`` is a deadline. Passing it does NOT mean
+  done, so the item stays active and is shown as OVERDUE until it is marked done
+  or it has been past due for a long time (the grace period), then it expires.
+
+Status: active -> done (marked) / expired (auto). Nothing is ever deleted.
 """
 
 from __future__ import annotations
@@ -18,6 +20,32 @@ from wiki_server.store import fm_value, parse_frontmatter, slugify, unique_stem
 
 TEMPORAL_DIR = "temporal"
 KINDS = ("todo", "reminder", "event")
+# Actionable kinds keep showing as overdue past their due date (a deadline is not
+# a completion); they only auto-expire after this many days past due.
+ACTIONABLE = ("todo", "reminder")
+GRACE_DAYS = 90
+
+
+def _as_date(value) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def surface_state(meta: dict, today: datetime.date | None = None) -> tuple[bool, bool]:
+    """For an active item, return (show, overdue) for prime: a future/undated item
+    shows normally; a past-due event is over (hidden); a past-due actionable item
+    stays shown, flagged overdue."""
+    today = today or datetime.date.today()
+    due_d = _as_date(meta.get("due", ""))
+    if due_d is None or due_d >= today:
+        return True, False
+    # Past due: an actionable item is overdue (shown) within the grace window;
+    # beyond it (or an event) it is over and hidden, even if no dream expired it.
+    if meta.get("type", "todo") in ACTIONABLE and (today - due_d).days <= GRACE_DAYS:
+        return True, True
+    return False, False
 
 
 def item_stem(content: str, due: str | None, created: str | None, taken: set[str] | None = None) -> str:
@@ -72,22 +100,39 @@ def list_items(active_only: bool = False) -> list[dict]:
 
 
 def expire_changes(today: str | None = None) -> dict[str, str]:
-    """Return {path: new_content} for active items whose due date (active-until)
-    has passed, flipping their status to ``expired``. Pure: the caller commits."""
-    today = today or datetime.date.today().isoformat()
+    """Return {path: new_content} for active items to expire, flipping them to
+    ``expired``. An event expires once past its end date; an actionable item
+    (todo/reminder) only once it is more than ``GRACE_DAYS`` past due (before that
+    it stays active and overdue). Pure: the caller commits."""
+    today_d = _as_date(today) or datetime.date.today()
     changes: dict[str, str] = {}
     for item in list_items():
         meta, body = item["meta"], item["body"]
-        due = meta.get("due", "")
-        if meta.get("status", "active") != "active" or not due:
+        if meta.get("status", "active") != "active":
             continue
-        # Only expire on a real ISO date; a malformed due (e.g. "10 au 15 juin")
-        # would compare arbitrarily and wrongly expire on the first run.
-        try:
-            datetime.date.fromisoformat(due)
-        except ValueError:
+        # Only act on a real ISO due; a malformed due (e.g. "10 au 15 juin") never
+        # expires (it would compare arbitrarily).
+        due_d = _as_date(meta.get("due", ""))
+        if due_d is None or due_d >= today_d:
             continue
-        if due < today:
-            changes[item["path"]] = _render_item(
-                meta.get("type", "todo"), meta.get("created", ""), "expired", due, body)
+        kind = meta.get("type", "todo")
+        if kind in ACTIONABLE and (today_d - due_d).days <= GRACE_DAYS:
+            continue  # overdue but kept until done or long-past
+        changes[item["path"]] = _render_item(
+            kind, meta.get("created", ""), "expired", meta.get("due", ""), body)
     return changes
+
+
+def mark_done(rel: str) -> bool:
+    """Mark a temporal item done (status: done) so it leaves the active list.
+    Returns whether the item existed."""
+    from wiki_server.store import write_file
+
+    path = resolve_under_root(rel)
+    if not path.is_file():
+        return False
+    meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+    content = _render_item(meta.get("type", "todo"), meta.get("created", ""),
+                           "done", meta.get("due", ""), body)
+    write_file(rel, content, f"manual: mark done {path.stem}")
+    return True

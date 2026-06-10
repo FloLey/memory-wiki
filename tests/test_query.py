@@ -23,13 +23,15 @@ def test_prime_hides_past_due_temporal(wiki, write):
     past = (today - datetime.timedelta(days=2)).isoformat()
     future = (today + datetime.timedelta(days=2)).isoformat()
     write("long_term/index.md", "# LTM\n")
-    write("temporal/p.md", f"---\ntype: todo\nstatus: active\ndue: {past}\n---\n\nPasse\n")
+    # past-due event -> over, hidden
+    write("temporal/passe.md", f"---\ntype: event\nstatus: active\ndue: {past}\n---\n\nSejourPasse\n")
+    # past-due todo -> kept, shown as overdue
+    write("temporal/retard.md", f"---\ntype: todo\nstatus: active\ndue: {past}\n---\n\nTodoEnRetard\n")
     write("temporal/f.md", f"---\ntype: event\nstatus: active\ndue: {future}\n---\n\nFutur\n")
-    write("temporal/t.md", f"---\ntype: reminder\nstatus: active\ndue: {today.isoformat()}\n---\n\nAujourdhui\n")
     out = query.build_prime()
     assert "Futur" in out
-    assert "Aujourdhui" in out
-    assert "Passe" not in out
+    assert "SejourPasse" not in out          # past event hidden
+    assert "TodoEnRetard" in out and "EN RETARD" in out  # overdue todo shown, flagged
 
 
 def test_search_returns_matches(wiki, write):

@@ -46,6 +46,39 @@ def test_expire_changes_flips_past_due(wiki, write):
     assert out.endswith("Rappel\n")
 
 
+def test_expire_keeps_overdue_todo_but_expires_event(wiki, write):
+    # both 5 days past due (within the grace window)
+    write("temporal/todo.md", "---\ntype: todo\nstatus: active\ndue: 2026-06-05\n---\n\nReserver voiture\n")
+    write("temporal/event.md", "---\ntype: event\nstatus: active\ndue: 2026-06-05\n---\n\nSejour\n")
+    changes = temporal.expire_changes("2026-06-10")
+    assert "temporal/event.md" in changes          # event over -> expired
+    assert "temporal/todo.md" not in changes        # overdue todo kept active
+
+
+def test_expire_todo_after_grace(wiki, write):
+    # a todo more than GRACE_DAYS past due finally expires
+    write("temporal/old.md", "---\ntype: todo\nstatus: active\ndue: 2020-01-01\n---\n\nVieux todo\n")
+    assert "temporal/old.md" in temporal.expire_changes("2026-06-10")
+
+
+def test_surface_state(wiki):
+    today = __import__("datetime").date(2026, 6, 10)
+    # past-due todo -> shown, overdue
+    assert temporal.surface_state({"type": "todo", "due": "2026-06-01"}, today) == (True, True)
+    # past-due event -> hidden
+    assert temporal.surface_state({"type": "event", "due": "2026-06-01"}, today) == (False, False)
+    # future -> shown, not overdue
+    assert temporal.surface_state({"type": "todo", "due": "2026-12-01"}, today) == (True, False)
+
+
+def test_mark_done(wiki, write):
+    write("temporal/t.md", "---\ntype: todo\nstatus: active\ndue: 2026-06-01\n---\n\nFaire X\n")
+    assert temporal.mark_done("temporal/t.md") is True
+    assert "status: done" in (wiki / "temporal/t.md").read_text()
+    assert temporal.list_items(active_only=True) == []  # no longer active
+    assert temporal.mark_done("temporal/missing.md") is False
+
+
 def test_expire_changes_keeps_future_and_malformed(wiki, write):
     write("temporal/future.md", "---\ntype: event\nstatus: active\ndue: 2999-01-01\n---\n\nF\n")
     write("temporal/bad.md", "---\ntype: event\nstatus: active\ndue: 10 au 15 juin\n---\n\nB\n")
