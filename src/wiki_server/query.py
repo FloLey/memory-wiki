@@ -12,8 +12,8 @@ import datetime
 
 from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
 
-# Self pages, in the order Claude should read them to ground itself.
-_SELF_ORDER = ["identity.md", "style.md", "voices.md", "familiars.md"]
+# Self pages (a fixed set), in the order Claude should read them to ground itself.
+_SELF_ORDER = ["identity.md", "style.md", "voices.md"]
 
 # Machinery hidden from the folder browser at the root (it has its own UI tabs).
 _HIDDEN_AT_ROOT = {"dream_reports", "prompts", "DREAM.md",
@@ -95,19 +95,12 @@ def build_prime() -> str:
     long-term and short-term indexes."""
     sections: list[str] = []
 
+    # Load exactly the fixed set of self pages, in order. Self is a closed set,
+    # so we do not glob for others (a stray page stays reachable via read/search).
     self_dir = resolve_under_root("long_term/self")
-    if self_dir.is_dir():
-        seen = set()
-        ordered = []
-        for name in _SELF_ORDER:
-            sp = self_dir / name
-            if sp.is_file():
-                ordered.append(sp)
-                seen.add(sp.name)
-        for sp in sorted(self_dir.glob("*.md")):
-            if sp.name not in seen:
-                ordered.append(sp)
-        for sp in ordered:
+    for name in _SELF_ORDER:
+        sp = self_dir / name
+        if sp.is_file():
             rel = sp.relative_to(wiki_root()).as_posix()
             sections.append(f"## {rel}\n\n{_safe_read(sp)}")
 

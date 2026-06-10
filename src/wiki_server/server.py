@@ -126,8 +126,8 @@ register_ui(
 @mcp.tool
 def prime() -> str:
     """Call this FIRST, at the very start of every conversation, before anything
-    else. It returns the full text of the self pages (identity, style, voices,
-    familiars) plus the long-term and short-term indexes in one call, so you know
+    else. It returns the full text of the self pages (identity, style, voices)
+    plus the long-term and short-term indexes in one call, so you know
     who the user is and the lay of the land. Then use search and read to go deeper.
     """
     return query.build_prime()

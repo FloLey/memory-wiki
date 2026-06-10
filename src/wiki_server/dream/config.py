@@ -37,9 +37,11 @@ jettes jamais, tu ne supprimes rien. Dans le doute, garde.
 ## Les catégories (fixes)
 Tu ne crées jamais de nouvelle catégorie de haut niveau ; tu ranges dans l'une
 de celles-ci.
-- self : Florent lui-même. Une seule page, self/identity.md, regroupe tous les
-  faits durables sur lui (naissance, métier, etc.) ; tu intègres ces faits dans
-  cette page unique et n'éclates jamais ses attributs en plusieurs pages self.
+- self : Florent lui-même, dans un ensemble FIXE de pages (jamais d'autre) :
+  self/identity.md (faits durables : bio, métier, relations, activités, goûts,
+  valeurs), self/style.md (ses préférences de communication et d'édition),
+  self/voices.md (Lunæris et Oron, ses instruments de pensée). Tu intègres dans
+  l'une de ces trois pages ; tu n'éclates jamais ses attributs en d'autres pages self.
 - people : les personnes (famille, amis, collègues, connaissances).
 - places : les lieux.
 - organizations : les organisations et entreprises.

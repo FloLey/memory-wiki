@@ -48,6 +48,11 @@ sont qualifiés. Ne fonds jamais deux personnes distinctes dans une seule page. 
 deux personnes différentes du même prénom apparaissent dans le lot, donne-leur des
 chemins distincts.
 
+Le self a un ensemble fixe de pages : les préférences de communication/édition de
+Florent vont sur self/style.md ; Lunæris et Oron (ses instruments de pensée) sur
+self/voices.md ; tout le reste sur lui (bio, métier, relations, goûts, valeurs)
+va sur self/identity.md. Pas d'autre page self.
+
 L'indice est une tendance, pas une contrainte : un même groupe peut avoir une
 part durable et une part datée, et l'étape suivante pourra produire les deux.
 Sois sélectif et fidèle ; n'invente rien et ne déduis pas au-delà du texte.
