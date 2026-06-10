@@ -195,6 +195,30 @@ def register_ui(
             sections = "<div class='empty'>Empty folder.</div>"
         return _page("Overview", crumb_html + sections, login=login)
 
+    @mcp.custom_route("/ui/logs", methods=["GET"])
+    async def ui_logs(request: Request) -> Response:
+        login = current_login(request)
+        if not login:
+            return RedirectResponse("/ui/login")
+        from wiki_server.logbuffer import recent_logs
+
+        entries = recent_logs(200)
+        if not entries:
+            body = "<div class='empty'>Aucun log en memoire (le serveur vient peut-etre de demarrer).</div>"
+            return _page("Logs", body, login=login)
+        rows = "".join(
+            f'<div class="logrow"><span class="muted">{html.escape(e["time"])} '
+            f'[{html.escape(e["level"])}] {html.escape(e["name"])}</span>'
+            f'<pre>{html.escape(e["msg"])}</pre></div>'
+            for e in entries
+        )
+        body = (
+            "<p class='muted'>Les logs recents du serveur (en memoire, les plus recents en haut). "
+            "Utile pour voir les runs du reve nocturne et les erreurs.</p>"
+            f"<section class='card'>{rows}</section>"
+        )
+        return _page("Logs", body, login=login)
+
     @mcp.custom_route("/ui/page/{path:path}", methods=["GET"])
     async def ui_view(request: Request) -> Response:
         login = current_login(request)

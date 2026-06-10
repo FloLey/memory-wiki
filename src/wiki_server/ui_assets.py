@@ -156,6 +156,9 @@ textarea { min-height: 58vh; line-height: 1.5; resize: vertical; }
 .field { margin-bottom: 1rem; }
 .actions { display: flex; gap: .6rem; margin-top: 1rem; align-items: center; }
 .empty { color: var(--muted); text-align: center; padding: 2rem 0; }
+.logrow { padding: .4rem 0; border-top: 1px solid var(--line); }
+.logrow:first-child { border-top: 0; }
+.logrow pre { margin: .2rem 0 0; white-space: pre-wrap; word-break: break-word; font-size: .82rem; }
 .login-wrap { max-width: 380px; margin: 12vh auto; text-align: center; }
 .login-wrap .card { padding: 2rem 1.5rem; }
 
@@ -182,6 +185,7 @@ def _page(title: str, body: str, *, login: str | None = None, crumb: str = "") -
             '<nav><a href="/ui">Overview</a>'
             '<a href="/ui/dream">Dreams</a>'
             '<a href="/ui/prompts">Prompts</a>'
+            '<a href="/ui/logs">Logs</a>'
             '<a href="/ui/edit">New page</a>'
             '<a href="/ui/logout">Logout</a></nav>'
         )

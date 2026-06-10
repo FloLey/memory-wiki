@@ -143,8 +143,10 @@ def _tick() -> str | None:
     _LAST_TICK = {"at": _now_local(sched["tz"]).strftime("%Y-%m-%d %H:%M"),
                   "action": action or "rien"}
     if action == "execute":
+        _log.info("nightly dream: running execute")
         run_execute()
     elif action == "dry-run":
+        _log.info("nightly dream: running dry-run")
         run_dry_run()
     return action
 

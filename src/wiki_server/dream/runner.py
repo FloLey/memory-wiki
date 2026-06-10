@@ -8,12 +8,15 @@ than a raw 500.
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 import traceback
 
 from wiki_server.store import write_files
 
 from .config import DREAM_REPORTS_DIR, _dream_lock, _stamp
+
+_log = logging.getLogger(__name__)
 
 
 def _no_key_report(when: datetime.datetime, dry: bool) -> tuple[str, str]:
@@ -55,4 +58,5 @@ def _guarded(dry: bool, work) -> tuple[str, str]:
                 return _no_key_report(when, dry)
             return work(when, day)
         except Exception:
+            _log.exception("dream run failed")
             return _error_report(when, dry)

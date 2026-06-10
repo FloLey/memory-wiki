@@ -210,15 +210,19 @@ async def health(_request: Request) -> JSONResponse:
 
 
 def main() -> None:
+    import logging
+    import threading
+
+    from wiki_server.dream import run_scheduler
+    from wiki_server.logbuffer import setup_logging
+
+    setup_logging()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8765"))
     # The nightly dream scheduler runs in a daemon thread alongside the server;
     # it does nothing until a nightly mode is enabled from the console.
-    import threading
-
-    from wiki_server.dream import run_scheduler
-
     threading.Thread(target=run_scheduler, daemon=True, name="dream-scheduler").start()
+    logging.getLogger("wiki_server").info("server up; nightly scheduler thread started")
     # Streamable HTTP transport at /mcp, the URL Claude.ai connects to.
     mcp.run(transport="http", host=host, port=port, path="/mcp")
 
