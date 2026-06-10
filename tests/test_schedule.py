@@ -53,6 +53,37 @@ def test_stm_count(wiki, write):
     assert schedule._stm_count() == 2
 
 
+def test_status_explains_why_not(wiki, write):
+    # off by default
+    assert schedule.status()["mode"] == "off"
+    assert schedule.status()["would_fire"] is False
+    assert schedule.status()["reason"] == "mode off"
+    # execute + enough entries + early hour -> would fire (hour defaults to 3,
+    # status uses the real clock so we only assert the count/threshold wiring)
+    schedule.set_schedule("execute", 0, None, 2)
+    write("short_term/entries/a.md", "x")
+    write("short_term/entries/b.md", "x")
+    s = schedule.status()
+    assert s["count"] == 2 and s["min_entries"] == 2
+    assert s["would_fire"] is True
+
+
+def test_status_blocks_below_min(wiki, write):
+    schedule.set_schedule("execute", 0, None, 5)
+    write("short_term/entries/a.md", "x")
+    s = schedule.status()
+    assert s["would_fire"] is False
+    assert "pas assez" in s["reason"]
+
+
+def test_tick_records_heartbeat(wiki, write):
+    schedule._LAST_TICK["at"] = None
+    schedule.set_schedule("off", 3)
+    schedule._tick()
+    assert schedule._LAST_TICK["at"] is not None
+    assert schedule._LAST_TICK["action"] == "rien"
+
+
 def test_report_done_checks_the_right_file(wiki, write):
     write("dream_reports/2026-06-04.md", "x")
     assert schedule._report_done("2026-06-04", "execute") is True

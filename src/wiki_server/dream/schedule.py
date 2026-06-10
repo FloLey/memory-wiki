@@ -128,16 +128,50 @@ def _due_action(now_local: datetime.datetime, hour: int, mode: str, report_done,
     return mode
 
 
+# Heartbeat: the scheduler thread rebinds this each tick (a single atomic
+# assignment, so a UI reader never sees a half-updated pair), in-process with the
+# server. ``at`` is None until the first tick (i.e. the thread is not running).
+_LAST_TICK: dict = {"at": None, "action": None}
+
+
 def _tick() -> str | None:
     """One scheduler check: run the dream if it is due. Returns what ran, or None."""
+    global _LAST_TICK
     sched = read_schedule()
     action = _due_action(_now_local(sched["tz"]), sched["hour"], sched["mode"],
                          _report_done, _stm_count(), sched["min_entries"])
+    _LAST_TICK = {"at": _now_local(sched["tz"]).strftime("%Y-%m-%d %H:%M"),
+                  "action": action or "rien"}
     if action == "execute":
         run_execute()
     elif action == "dry-run":
         run_dry_run()
     return action
+
+
+def status() -> dict:
+    """Snapshot for the UI: the settings, whether the nightly dream would fire
+    right now (and the blocking reason otherwise), the server's local time and
+    short-term count, and when the scheduler last checked."""
+    sched = read_schedule()
+    now = _now_local(sched["tz"])
+    count = _stm_count()
+    if sched["mode"] not in ("dry-run", "execute"):
+        reason = "mode off"
+    elif now.hour < sched["hour"]:
+        reason = f"avant l'heure ({now.hour:02d}h < {sched['hour']:02d}h {sched['tz']})"
+    elif _report_done(now.date().isoformat(), sched["mode"]):
+        reason = "rapport du jour déjà présent"
+    elif count < max(1, sched["min_entries"]):
+        reason = f"pas assez d'entrées ({count} < {sched['min_entries']})"
+    else:
+        reason = ""
+    return {
+        "mode": sched["mode"], "hour": sched["hour"], "tz": sched["tz"],
+        "min_entries": sched["min_entries"], "now": now.strftime("%H:%M"),
+        "count": count, "would_fire": reason == "", "reason": reason,
+        "last_tick": _LAST_TICK["at"], "last_action": _LAST_TICK["action"],
+    }
 
 
 def run_scheduler(poll_seconds: int = _POLL_SECONDS) -> None:

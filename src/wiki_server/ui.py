@@ -311,7 +311,9 @@ def register_ui(
         login = current_login(request)
         if not login:
             return RedirectResponse("/ui/login")
-        from wiki_server.dream import MODES, list_reports, read_schedule, usage_summary
+        from wiki_server.dream import (
+            MODES, list_reports, read_schedule, schedule_status, usage_summary,
+        )
 
         reports = list_reports()
         rows = "".join(
@@ -375,6 +377,23 @@ def register_ui(
             '</form>'
         )
         sched = read_schedule()
+        st = schedule_status()
+        if st["would_fire"]:
+            verdict = "se declencherait maintenant (ou au prochain check, sous ~10 min)"
+        else:
+            verdict = f"ne se declenche pas : {html.escape(st['reason'])}"
+        if st["last_tick"]:
+            last_check = f"{html.escape(str(st['last_tick']))} (action : {html.escape(str(st['last_action']))})"
+        else:
+            last_check = "jamais (le planificateur n'a pas encore tique)"
+        status_html = (
+            "<p class='muted'>"
+            f"Etat : {verdict}.<br>"
+            f"Heure vue par le serveur : {st['now']} ({html.escape(st['tz'])}) ; "
+            f"entrees court terme : {st['count']} (min {st['min_entries']}).<br>"
+            f"Dernier check du planificateur : {last_check}."
+            "</p>"
+        )
         mode_opts = "".join(
             f'<option value="{m}"{" selected" if m == sched["mode"] else ""}>{m}</option>'
             for m in MODES
@@ -385,6 +404,7 @@ def register_ui(
             "execute : applique chaque nuit. Une seule fois par jour, apres l'heure choisie "
             f"({html.escape(sched['tz'])}), et seulement si la memoire court terme a assez "
             "d'entrees.</p>"
+            f"{status_html}"
             '<form method="post" action="/ui/dream/schedule">'
             f'<input type="hidden" name="csrf" value="{token}">'
             f'<div class="field"><label for="s-mode">Mode</label>'

@@ -27,7 +27,7 @@ from .config import DREAM_POLICY, ensure_policy
 from .migration import migrate_entities
 from .models import AVAILABLE_MODELS, DEFAULT_MODEL, STAGES, effective_models, read_models, set_models
 from .pipeline import list_reports, run_dry_run, run_execute
-from .schedule import MODES, read_schedule, run_scheduler, set_schedule
+from .schedule import MODES, read_schedule, run_scheduler, set_schedule, status as schedule_status
 from .usage import read_usage, reset_usage, usage_summary
 
 __all__ = [
@@ -43,5 +43,5 @@ __all__ = [
     "effective_models", "set_models", "read_models",
     "AVAILABLE_MODELS", "STAGES", "DEFAULT_MODEL",
     # nightly scheduler
-    "read_schedule", "set_schedule", "run_scheduler", "MODES",
+    "read_schedule", "set_schedule", "run_scheduler", "MODES", "schedule_status",
 ]
