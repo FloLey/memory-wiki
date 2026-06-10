@@ -11,10 +11,10 @@ layer. A nightly **dream** then distils those captures into curated long-term
 pages, the same way memory consolidates during sleep. You can read and edit
 everything through a private web console.
 
-This is a standalone Python service, deployed alongside the rest of
-[florent-lejoly.be](https://florent-lejoly.be) and reachable at
-`https://wiki.florent-lejoly.be/mcp`. The code is path-agnostic via the
-`WIKI_ROOT` environment variable. See [Deployment](#deployment) for how it runs.
+It is a standalone Python service: a Docker image, an HTTP MCP endpoint, and a
+named volume holding the wiki. The code is path-agnostic via the `WIKI_ROOT`
+environment variable, so it runs the same locally or on any host behind a
+TLS-terminating reverse proxy.
 
 ## MCP tools (what Claude calls)
 
@@ -102,35 +102,35 @@ the wiki stays private to its owner. The browser console uses the same OAuth app
 | Variable | Required | Purpose |
 |---|---|---|
 | `GH_OAUTH_CLIENT_ID` / `GH_OAUTH_CLIENT_SECRET` | yes (prod) | GitHub OAuth; the server refuses to start without them unless auth is disabled |
+| `WIKI_PUBLIC_URL` | prod | the public base URL of the server, e.g. `https://YOUR_DOMAIN` |
+| `WIKI_ALLOWED_GITHUB_LOGIN` | yes (prod) | the single GitHub login allowed to use the wiki |
 | `WIKI_JWT_SIGNING_KEY` | recommended | stable random value so tokens survive restarts |
-| `WIKI_ALLOWED_GITHUB_LOGIN` | yes (prod) | the single GitHub login allowed (default `FloLey`) |
 | `ANTHROPIC_API_KEY` | for the dream | the model calls in the consolidation pipeline |
 | `WIKI_DREAM_MODEL` (+ `_TRIAGE`/`_DECIDE`/`_WRITE`) | no | dream model overrides |
+| `WIKI_ROOT` | no | where the wiki lives (default `/srv/wiki`) |
 | `WIKI_AUTH_DISABLED=1` | dev only | run open, no secrets needed |
 
-In production these are set in the deploy of the
-[FloLey-public-website](https://github.com/FloLey/FloLey-public-website) repo,
-which writes them into the VPS `.env`. They are **not** stored in this repo. See
-[Deployment](#deployment).
+Provide these through your deployment's environment (a `.env` file, container
+secrets, an orchestrator, etc.). They are configuration, not committed to the
+repo.
 
 ### GitHub OAuth app setup (one time)
 
 Create a GitHub OAuth App (Settings -> Developer settings -> OAuth Apps) with:
 
-- Homepage URL: `https://wiki.florent-lejoly.be`
-- Authorization callback URL: `https://wiki.florent-lejoly.be/` (GitHub accepts
-  any subpath, so both `/auth/callback` for Claude and `/ui/auth/callback` for
-  the console work). Secret names must not start with `GITHUB_`, which GitHub
-  reserves.
+- Homepage URL: `https://YOUR_DOMAIN`
+- Authorization callback URL: `https://YOUR_DOMAIN/` (GitHub accepts any subpath,
+  so both `/auth/callback` for Claude and `/ui/auth/callback` for the console
+  work). Secret names must not start with `GITHUB_`, which GitHub reserves.
 
 ## Architecture
 
 - **Transport:** Streamable HTTP, MCP mounted at `/mcp`, listening on `:8765`.
-- **Data:** a Docker named volume `wiki_data` mounted at `/srv/wiki`. The
-  entrypoint seeds it from `seed/` only if empty, then `git init`s it, so
-  redeploys never clobber data.
-- **Public URL:** `https://wiki.florent-lejoly.be/mcp`, fronted by Caddy
-  (auto-HTTPS) in the FloLey-public-website stack.
+- **Data:** the wiki lives under `WIKI_ROOT` (default `/srv/wiki`), intended to
+  be a persistent volume. The entrypoint seeds it from `seed/` only if empty,
+  then `git init`s it, so restarts never clobber data.
+- **Public URL:** `https://YOUR_DOMAIN/mcp`, behind a reverse proxy that
+  terminates TLS (Caddy, nginx, Traefik, etc.).
 
 ```
 memory-wiki/
@@ -188,34 +188,22 @@ pytest -q
 
 ## Deployment
 
-This repo deploys itself. On every push, GitHub Actions
-(`.github/workflows/ci.yml`):
+The image is built from the included `Dockerfile`. A GitHub Actions workflow
+(`.github/workflows/ci.yml`) runs the tests and, on `main`, builds and pushes
+the image to GHCR. From there, deploy the container however you like: any Docker
+host works, as long as the MCP endpoint sits behind a reverse proxy that
+terminates HTTPS at your public URL and the env vars above are supplied.
 
-1. runs the test suite;
-2. on `main`, builds and pushes the image to
-   `ghcr.io/floley/memory-wiki:latest`;
-3. connects to the VPS (over Tailscale, then SSH) and restarts just this
-   service: `docker compose pull mcp-server && docker compose up -d --no-deps mcp-server`.
+Two things to remember in production:
 
-The VPS runs the **full stack** (the website frontend, this server, the image
-MCP, and a Caddy reverse proxy) from the
-[FloLey-public-website](https://github.com/FloLey/FloLey-public-website) repo's
-`docker-compose.yml`. That repo's deploy is what writes the runtime secrets
-(`GH_OAUTH_*`, `WIKI_JWT_SIGNING_KEY`, `ANTHROPIC_API_KEY`, etc.) into the VPS
-`.env`, which this container reads. So the **application secrets live in that
-repo**, not here.
-
-This repo only needs the four infrastructure secrets used to reach the VPS:
-`VPS_USER`, `VPS_SSH_KEY`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
-
-DNS is the one manual prerequisite: `wiki.florent-lejoly.be` must resolve to the
-same public IP as `florent-lejoly.be`. Caddy issues HTTPS automatically on the
-first request.
+- mount a **persistent volume** at `WIKI_ROOT` so the wiki survives restarts;
+- point a DNS record for your domain at the host, and let the reverse proxy
+  handle the certificate.
 
 ## Connect Claude.ai
 
 1. In Claude.ai: Settings -> Connectors -> Add custom connector.
-2. URL: `https://wiki.florent-lejoly.be/mcp`.
+2. URL: `https://YOUR_DOMAIN/mcp`.
 3. Claude redirects you to GitHub to log in and consent. Only the allow-listed
    GitHub account can use the tools.
 4. Ask Claude to call `prime()`, then `read("self/identity.md")`.
