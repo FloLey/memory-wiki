@@ -149,6 +149,20 @@ def ensure_prompt(stage: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def reset_prompts() -> None:
+    """Overwrite the policy (DREAM.md) and the three stage prompts with their
+    shipped defaults, in a single revertible commit. Lets the owner restore the
+    canonical guidance from the UI after editing or after deploying a new default
+    (deploys never touch these editable files)."""
+    from wiki_server.dream.config import DEFAULT_DREAM_MD, DREAM_POLICY
+    from wiki_server.store import write_files
+
+    files = {DREAM_POLICY: DEFAULT_DREAM_MD}
+    for stage, rel in PROMPT_FILES.items():
+        files[rel] = DEFAULTS[stage]
+    write_files(files, "manual: reset prompts to defaults")
+
+
 def build(stage: str, context: str) -> str:
     """Full prompt = editable guidance + injected context + fixed JSON schema."""
     guidance = ensure_prompt(stage)

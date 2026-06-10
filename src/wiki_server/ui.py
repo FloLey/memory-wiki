@@ -441,7 +441,8 @@ def register_ui(
             "<p class='muted'>"
             f"Etat : {verdict}.<br>"
             f"Heure vue par le serveur : {st['now']} ({html.escape(st['tz'])}) ; "
-            f"entrees court terme : {st['count']} (min {st['min_entries']}).<br>"
+            f"entrees court terme : {st['count']} (min {st['min_entries']}, "
+            f"max {st['max_entries']}).<br>"
             f"Dernier check du planificateur : {last_check}."
             "</p>"
         )
@@ -452,9 +453,10 @@ def register_ui(
         schedule_card = (
             '<section class="card"><h2>Nightly dream (automatique)</h2>'
             "<p class='muted'>off : rien. dry-run : propose chaque nuit (tu valides au matin). "
-            "execute : applique chaque nuit. Une seule fois par jour, apres l'heure choisie "
-            f"({html.escape(sched['tz'])}), et seulement si la memoire court terme a assez "
-            "d'entrees.</p>"
+            "execute : applique chaque nuit. Une seule fois par jour, a l'heure choisie "
+            f"({html.escape(sched['tz'])}) si la memoire court terme a au moins le minimum "
+            "d'entrees. Exception : des qu'elle atteint le maximum, le reve part tout de "
+            "suite, a n'importe quelle heure, pour ne pas laisser le backlog gonfler.</p>"
             f"{status_html}"
             '<form method="post" action="/ui/dream/schedule">'
             f'<input type="hidden" name="csrf" value="{token}">'
@@ -462,8 +464,10 @@ def register_ui(
             f'<select id="s-mode" name="mode">{mode_opts}</select></div>'
             f'<div class="field"><label for="s-hour">Heure locale (0-23)</label>'
             f'<input type="number" id="s-hour" name="hour" min="0" max="23" value="{sched["hour"]}"></div>'
-            f'<div class="field"><label for="s-min">Minimum d\'entrees court terme</label>'
+            f'<div class="field"><label for="s-min">Minimum d\'entrees (reve a l\'heure prevue)</label>'
             f'<input type="number" id="s-min" name="min_entries" min="1" value="{sched["min_entries"]}"></div>'
+            f'<div class="field"><label for="s-max">Maximum d\'entrees (reve immediat)</label>'
+            f'<input type="number" id="s-max" name="max_entries" min="1" value="{sched["max_entries"]}"></div>'
             '<button class="btn" type="submit">Enregistrer la planification</button>'
             '</form></section>'
         )
@@ -515,7 +519,9 @@ def register_ui(
             return err
         from wiki_server.dream import set_schedule
 
-        set_schedule(form.get("mode"), form.get("hour"), min_entries=form.get("min_entries"))
+        set_schedule(form.get("mode"), form.get("hour"),
+                     min_entries=form.get("min_entries"),
+                     max_entries=form.get("max_entries"))
         return RedirectResponse("/ui/dream", status_code=303)
 
     # ---- prompts (editable policy + stage prompts) ----
@@ -606,12 +612,26 @@ def register_ui(
                 '<button class="btn" type="submit">Migrer entities</button>'
                 '</form></section>'
             )
+        reset_card = (
+            '<section class="card"><h2>Reinitialiser les prompts</h2>'
+            "<p class='muted'>Remet la politique (DREAM.md) et les trois prompts "
+            "(triage, decide, write) a leur version par defaut livree avec le code, "
+            "en un commit reversible. Les deploiements ne touchent jamais ces fichiers "
+            "editables : utilise ce bouton pour appliquer une nouvelle version par defaut "
+            "ou annuler tes modifications.</p>"
+            '<form method="post" action="/ui/prompts/reset" '
+            "onsubmit=\"return confirm('Reinitialiser la politique et les trois prompts "
+            "aux valeurs par defaut ? Un commit reversible.')\">"
+            f'<input type="hidden" name="csrf" value="{csrf_token(login)}">'
+            '<button class="btn" type="submit">Reinitialiser aux valeurs par defaut</button>'
+            '</form></section>'
+        )
         body = (
             "<p class='muted'>La politique et les trois prompts du daemon sont editables. "
             "Le schema de sortie JSON est ajoute par le code, donc editer les consignes ne "
             "casse jamais le contrat machine.</p>"
             f"<section class='card'><ul class='filelist'>{''.join(rows)}</ul></section>"
-            f"{models_form}{migrate_card}"
+            f"{models_form}{reset_card}{migrate_card}"
         )
         return _page("Prompts", body, login=login)
 
@@ -625,6 +645,16 @@ def register_ui(
 
         rel, _ = await run_in_threadpool(migrate_entities)
         return RedirectResponse(f"/ui/page/{quote(rel)}", status_code=303)
+
+    @mcp.custom_route("/ui/prompts/reset", methods=["POST"])
+    async def ui_prompts_reset(request: Request) -> Response:
+        login, form, err = await require_post(request)
+        if err:
+            return err
+        from wiki_server.prompts import reset_prompts
+
+        reset_prompts()
+        return RedirectResponse("/ui/prompts", status_code=303)
 
     @mcp.custom_route("/ui/prompts/models", methods=["POST"])
     async def ui_prompts_models(request: Request) -> Response:
