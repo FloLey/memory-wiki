@@ -36,8 +36,8 @@ from wiki_server.paths import WikiPathError, resolve_under_root
 from wiki_server.store import write_stm_entry
 from wiki_server.ui import register_ui
 
-DEFAULT_PUBLIC_URL = "https://wiki.florent-lejoly.be"
-DEFAULT_ALLOWED_LOGIN = "FloLey"
+DEFAULT_PUBLIC_URL = "http://localhost:8765"
+DEFAULT_ALLOWED_LOGIN = ""
 
 
 def _build_auth():

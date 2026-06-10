@@ -30,7 +30,7 @@ STM_INDEX_HEADER = (
 
 _GIT_CONFIG = [
     "-c", "user.name=wiki-server",
-    "-c", "user.email=wiki-server@florent-lejoly.be",
+    "-c", "user.email=wiki-server@localhost",
     "-c", "commit.gpgsign=false",
 ]
 

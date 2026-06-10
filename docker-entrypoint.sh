@@ -13,7 +13,7 @@ if [ -z "$(ls -A "$WIKI_ROOT" 2>/dev/null)" ]; then
 
   cd "$WIKI_ROOT"
   git init -q
-  git config user.email "wiki-daemon@florent-lejoly.be"
+  git config user.email "wiki-daemon@localhost"
   git config user.name "wiki-daemon"
   git add -A
   git commit -q -m "seed: initial wiki structure"

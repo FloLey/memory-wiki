@@ -75,13 +75,13 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: 100.109.197.38
+          host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           script: |
             set -e
-            cd /opt/FloLey-public-website
+            cd ${{ secrets.DEPLOY_DIR }}
             # Runtime secrets live in the VPS .env (written by the website repo
             # deploy); we only refresh this service's image and restart it.
             docker compose pull mcp-server
