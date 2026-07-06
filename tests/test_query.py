@@ -85,6 +85,26 @@ def test_search_empty_query(wiki, write):
     assert query.search_wiki("   ") == "Empty query."
 
 
+def test_search_no_truncation_message_at_exact_limit(wiki, write):
+    write("p.md", "cible\ncible\ncible\n")   # exactly 3 matching lines
+    out = query.search_wiki("cible", max_results=3)
+    assert "stopped at" not in out
+    assert len(out.splitlines()) == 3
+
+
+def test_search_truncates_beyond_limit(wiki, write):
+    write("p.md", "cible\ncible\ncible\ncible\n")  # 4 matches, cap 3
+    out = query.search_wiki("cible", max_results=3)
+    assert "... (stopped at 3 matches)" in out
+
+
+def test_search_deduplicates_keywords(wiki, write):
+    write("p.md", "# Titre\n\nLe mot cible apparait ici.\n")
+    # A repeated keyword must not multiply the result lines.
+    out = query.search_wiki("cible cible")
+    assert out.count("p.md:") == 1
+
+
 def test_find_pages_by_name(wiki, write):
     write("long_term/people/maryse.md", "x")
     assert query.find_pages_by_name("maryse.md") == ["long_term/people/maryse.md"]

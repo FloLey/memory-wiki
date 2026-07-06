@@ -156,8 +156,9 @@ _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
 def _keywords(query: str) -> list[str]:
-    """Split a query into independent, lowercased keywords."""
-    return [k for k in query.lower().split() if k]
+    """Split a query into independent, lowercased keywords, de-duplicated
+    (order preserved) so a repeated word is not matched and ranked twice."""
+    return list(dict.fromkeys(k for k in query.lower().split() if k))
 
 
 def _tags_of(meta: dict) -> list[str]:
@@ -181,9 +182,20 @@ def _match_keywords(text: str, keywords: list[str]) -> dict[str, int]:
             continue
         if tokens is None:
             tokens = _WORD_RE.findall(lowered)
+        # Set the keyword as seq2 once so its char index is reused per token.
+        matcher = difflib.SequenceMatcher()
+        matcher.set_seq2(kw)
         for tok in tokens:
-            if len(tok) >= _FUZZY_MIN_LEN and \
-                    difflib.SequenceMatcher(None, kw, tok).ratio() >= _FUZZY_THRESHOLD:
+            if len(tok) < _FUZZY_MIN_LEN:
+                continue
+            # A ratio >= threshold needs 2*min(len) >= threshold*(sum of lens);
+            # this length pre-filter skips clearly-too-different tokens cheaply.
+            if 2 * min(len(kw), len(tok)) < _FUZZY_THRESHOLD * (len(kw) + len(tok)):
+                continue
+            matcher.set_seq1(tok)
+            if (matcher.real_quick_ratio() >= _FUZZY_THRESHOLD
+                    and matcher.quick_ratio() >= _FUZZY_THRESHOLD
+                    and matcher.ratio() >= _FUZZY_THRESHOLD):
                 hits[kw] = _FUZZY
                 break
     return hits
@@ -257,10 +269,15 @@ def search_wiki(query: str, max_results: int = 30) -> str:
     pages.sort(key=lambda p: (-p[0], -p[1], p[2]))
 
     results: list[str] = []
+    truncated = False
     for _coverage, _exact, rel, out_lines in pages:
         for lineno, line in out_lines:
-            results.append(f"{rel}:{lineno}: {line}")
             if len(results) >= max_results:
-                results.append(f"... (stopped at {max_results} matches)")
-                return "\n".join(results)
+                truncated = True  # a match exists beyond the cap
+                break
+            results.append(f"{rel}:{lineno}: {line}")
+        if truncated:
+            break
+    if truncated:
+        results.append(f"... (stopped at {max_results} matches)")
     return "\n".join(results)
