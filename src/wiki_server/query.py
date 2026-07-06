@@ -2,15 +2,23 @@
 
 These back the MCP read tools that let Claude ground itself: a one-call context
 loader (``build_prime``) and a full-text search (``search_wiki``). Search is a
-simple pure-Python scan, which is plenty for a personal wiki of dozens of pages;
-it can be swapped for ripgrep later if it ever feels slow.
+pure-Python scan, which is plenty for a personal wiki of dozens of pages; it can
+be swapped for ripgrep later if it ever feels slow.
+
+The scan matches each whitespace-separated keyword independently (so word order
+and phrasing do not matter), searches frontmatter ``tags`` as first-class
+content, and tolerates typos via fuzzy matching. Pages that cover more of the
+query rank first.
 """
 
 from __future__ import annotations
 
 import datetime
+import difflib
+import re
 
 from wiki_server.paths import WikiPathError, resolve_under_root, wiki_root
+from wiki_server.store import parse_frontmatter
 
 # Self pages (a fixed set), in the order Claude should read them to ground itself.
 _SELF_ORDER = ["identity.md", "style.md", "voices.md"]
@@ -131,23 +139,128 @@ def build_prime() -> str:
     return "\n\n---\n\n".join(sections)
 
 
+# --- search internals -------------------------------------------------------
+
+# Fuzzy matching only kicks in for tokens this long: below it, near-matches are
+# mostly noise (every short word is "close" to many others).
+_FUZZY_MIN_LEN = 4
+# difflib ratio a keyword/token pair must clear to count as a fuzzy hit. High
+# enough that "flornet"~"florent" passes but unrelated words do not.
+_FUZZY_THRESHOLD = 0.8
+
+# Match quality, used to rank exact hits above fuzzy ones.
+_EXACT = 2
+_FUZZY = 1
+
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _keywords(query: str) -> list[str]:
+    """Split a query into independent, lowercased keywords."""
+    return [k for k in query.lower().split() if k]
+
+
+def _tags_of(meta: dict) -> list[str]:
+    """Frontmatter tags as a list. Accepts ``[a, b]`` or ``a, b`` forms."""
+    raw = meta.get("tags", "").strip().strip("[]").strip()
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def _match_keywords(text: str, keywords: list[str]) -> dict[str, int]:
+    """For one line (or the tag string), return {keyword: quality} for each
+    keyword that hits it. A keyword hits by substring (exact) or, failing that,
+    by being fuzzy-close to some word in the text (fuzzy)."""
+    lowered = text.lower()
+    tokens = None  # tokenize lazily; most lines never need the fuzzy pass
+    hits: dict[str, int] = {}
+    for kw in keywords:
+        if kw in lowered:
+            hits[kw] = _EXACT
+            continue
+        if len(kw) < _FUZZY_MIN_LEN:
+            continue
+        if tokens is None:
+            tokens = _WORD_RE.findall(lowered)
+        for tok in tokens:
+            if len(tok) >= _FUZZY_MIN_LEN and \
+                    difflib.SequenceMatcher(None, kw, tok).ratio() >= _FUZZY_THRESHOLD:
+                hits[kw] = _FUZZY
+                break
+    return hits
+
+
+def _frontmatter_span(lines: list[str]) -> int:
+    """Number of leading lines occupied by a ``---`` frontmatter block (0 if
+    none). Used so reported line numbers refer to the real file, not the body
+    with frontmatter stripped."""
+    if not lines or lines[0].strip() != "---":
+        return 0
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return idx + 1
+    return 0
+
+
 def search_wiki(query: str, max_results: int = 30) -> str:
-    """Case-insensitive full-text search. Returns matching lines as
-    ``path:line: text``, or a message when there is no match."""
-    needle = query.strip().lower()
-    if not needle:
+    """Keyword search across the whole memory. Each whitespace-separated keyword
+    is matched independently (order-insensitive), frontmatter tags are searched
+    as well as page text, and near-misses are caught by fuzzy matching so typos
+    still hit. Returns matching lines as ``path:line: text`` (line ``0`` is a
+    page's tags), ranked so pages covering more of the query come first, or a
+    message when there is no match."""
+    keywords = _keywords(query)
+    if not keywords:
         return "Empty query."
     max_results = max(1, max_results)
-    results: list[str] = []
+
+    # (coverage, exact_hits, rel, [(lineno, text)]) per matching page.
+    pages: list[tuple[int, int, str, list[tuple[int, str]]]] = []
     for rel, path in _iter_wiki_md():
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        lines = text.splitlines()
+        meta, _ = parse_frontmatter(text)
+
+        covered: dict[str, int] = {}  # best quality seen per keyword, page-wide
+        out_lines: list[tuple[int, str]] = []
+
+        tags = _tags_of(meta)
+        if tags:
+            tag_str = ", ".join(tags)
+            hits = _match_keywords(tag_str, keywords)
+            if hits:
+                for kw, q in hits.items():
+                    covered[kw] = max(covered.get(kw, 0), q)
+                out_lines.append((0, f"[tags: {tag_str}]"))
+
+        skip = _frontmatter_span(lines)
         for i, line in enumerate(lines, 1):
-            if needle in line.lower():
-                results.append(f"{rel}:{i}: {line.strip()}")
-                if len(results) >= max_results:
-                    results.append(f"... (stopped at {max_results} matches)")
-                    return "\n".join(results)
-    return "\n".join(results) if results else f"No matches for {query!r}."
+            if i <= skip:
+                continue
+            hits = _match_keywords(line, keywords)
+            if hits:
+                for kw, q in hits.items():
+                    covered[kw] = max(covered.get(kw, 0), q)
+                out_lines.append((i, line.strip()))
+
+        if covered:
+            coverage = len(covered)
+            exact_hits = sum(1 for q in covered.values() if q == _EXACT)
+            pages.append((coverage, exact_hits, rel, out_lines))
+
+    if not pages:
+        return f"No matches for {query!r}."
+
+    # More keywords covered first, then more exact (vs fuzzy) hits, then path.
+    pages.sort(key=lambda p: (-p[0], -p[1], p[2]))
+
+    results: list[str] = []
+    for _coverage, _exact, rel, out_lines in pages:
+        for lineno, line in out_lines:
+            results.append(f"{rel}:{lineno}: {line}")
+            if len(results) >= max_results:
+                results.append(f"... (stopped at {max_results} matches)")
+                return "\n".join(results)
+    return "\n".join(results)

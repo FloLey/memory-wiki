@@ -40,6 +40,51 @@ def test_search_returns_matches(wiki, write):
     assert "long_term/people/maryse.md" in out
 
 
+def test_search_independent_keywords_order_insensitive(wiki, write):
+    write("long_term/people/maryse.md", "# Maryse\n\nSoeur de Florent.\n")
+    # Keywords appear in a different order and not adjacent in the text.
+    out = query.search_wiki("florent soeur")
+    assert "long_term/people/maryse.md" in out
+
+
+def test_search_ranks_more_keyword_coverage_first(wiki, write):
+    write("a.md", "# A\n\nFlorent aime le vélo.\n")           # 2 keywords
+    write("b.md", "# B\n\nFlorent seulement ici.\n")          # 1 keyword
+    out = query.search_wiki("florent vélo")
+    assert out.index("a.md") < out.index("b.md")
+
+
+def test_search_matches_tags(wiki, write):
+    write("long_term/projects/wiki.md",
+          "---\ntags: [memoire, projet]\n---\n\n# Wiki\n\nUn systeme.\n")
+    out = query.search_wiki("projet")
+    assert "long_term/projects/wiki.md" in out
+    assert "[tags: memoire, projet]" in out
+
+
+def test_search_fuzzy_tolerates_typo(wiki, write):
+    write("long_term/people/florent.md", "# Florent\n\nQuelqu'un.\n")
+    out = query.search_wiki("flornet")          # transposed letters
+    assert "long_term/people/florent.md" in out
+
+
+def test_search_line_numbers_account_for_frontmatter(wiki, write):
+    write("p.md", "---\ntags: [x]\n---\n\n# Titre\n\nLe mot cible ici.\n")
+    out = query.search_wiki("cible")
+    # "cible" is on the 4th body line but the 7th line of the file.
+    assert "p.md:7:" in out
+
+
+def test_search_no_match_message(wiki, write):
+    write("p.md", "# Rien\n")
+    assert query.search_wiki("introuvable") == "No matches for 'introuvable'."
+
+
+def test_search_empty_query(wiki, write):
+    write("p.md", "# Rien\n")
+    assert query.search_wiki("   ") == "Empty query."
+
+
 def test_find_pages_by_name(wiki, write):
     write("long_term/people/maryse.md", "x")
     assert query.find_pages_by_name("maryse.md") == ["long_term/people/maryse.md"]

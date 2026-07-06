@@ -172,9 +172,14 @@ def read(path: str) -> str:
 
 @mcp.tool
 def search(query_text: str, max_results: int = 30) -> str:
-    """Full-text search across the whole memory. Returns matching lines as
-    ``path:line: text``. Use it to find where something is mentioned, then open
+    """Keyword search across the whole memory. Returns matching lines as
+    ``path:line: text`` (line ``0`` is a page's tags), ranked with the most
+    relevant pages first. Use it to find where something is mentioned, then open
     the file with read.
+
+    Each whitespace-separated keyword is matched independently, so word order
+    and phrasing do not matter; frontmatter tags are searched alongside page
+    text; and typos still hit thanks to fuzzy matching.
     """
     return query.search_wiki(query_text, max_results=max_results)
 
